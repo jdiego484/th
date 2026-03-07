@@ -1,0 +1,17 @@
+{
+  "name": "Track & Health",
+  "short_name": "TrackHealth",
+  "description": "O seu personal trainer 24 horas",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0a0a0a",
+  "theme_color": "#ea580c",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

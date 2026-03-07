@@ -1,6 +1,6 @@
 import { useState, useEffect, createContext, useContext, ReactNode, FormEvent, ChangeEvent } from "react";
 import { BrowserRouter, Routes, Route, Navigate, useNavigate } from "react-router-dom";
-import { User, LogOut, Users, Dumbbell, Activity, Search, Plus, ArrowLeft, Clock, Play, Check, Trash2, ChevronLeft, ChevronRight, Calendar as CalendarIcon, AlertTriangle, Image as ImageIcon, Video, Upload, X } from "lucide-react";
+import { User, LogOut, Users, Dumbbell, Activity, Search, Plus, ArrowLeft, Clock, Play, Check, Trash2, ChevronLeft, ChevronRight, Calendar as CalendarIcon, AlertTriangle, Image as ImageIcon, Video, Upload, X, Copy, Edit2, MessageSquare, CheckCircle2 } from "lucide-react";
 import { auth, db } from "./firebase";
 import { EXERCISES } from "./data/exercises";
 import { AssessmentView } from "./components/AssessmentView";
@@ -507,19 +507,55 @@ function CustomCalendar({ selectedDate, onSelectDate }: { selectedDate: string, 
   );
 }
 
-function WorkoutBuilder({ client, onBack }: { client: any, onBack: () => void }) {
+function WorkoutBuilder({ client, onBack, existingWorkout }: { client: any, onBack: () => void, existingWorkout?: any }) {
   const { user } = useAuth();
-  const [exercises, setExercises] = useState<any[]>([]);
+  const [exercises, setExercises] = useState<any[]>(existingWorkout?.exercises || []);
   const [currentExercise, setCurrentExercise] = useState("");
   const [sets, setSets] = useState("3");
   const [reps, setReps] = useState("10");
   const [rest, setRest] = useState("60"); // seconds
   const [prescription, setPrescription] = useState(""); // For cardio
-  const [workoutDate, setWorkoutDate] = useState(new Date().toISOString().split('T')[0]);
+  const [workoutDate, setWorkoutDate] = useState(
+    existingWorkout?.date 
+      ? new Date(existingWorkout.date).toISOString().split('T')[0] 
+      : new Date().toISOString().split('T')[0]
+  );
   const [isSaving, setIsSaving] = useState(false);
   const [showExerciseList, setShowExerciseList] = useState(false);
   const [media, setMedia] = useState<{ url: string, type: 'image' | 'video' } | null>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [pastWorkouts, setPastWorkouts] = useState<any[]>([]);
+  const [showCopyModal, setShowCopyModal] = useState(false);
+
+  useEffect(() => {
+    fetchPastWorkouts();
+  }, [client.id]);
+
+  const fetchPastWorkouts = async () => {
+    if (!user) return;
+    try {
+      const q = query(
+        collection(db, "workouts"),
+        where("client_id", "==", client.id),
+        where("personal_id", "==", user.id)
+      );
+      const querySnapshot = await getDocs(q);
+      const workoutsData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      workoutsData.sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      setPastWorkouts(workoutsData);
+    } catch (error) {
+      console.error("Error fetching past workouts:", error);
+    }
+  };
+
+  const copyWorkout = (workout: any) => {
+    const copiedExercises = workout.exercises.map((ex: any) => ({
+      ...ex,
+      id: Math.random().toString(36).substring(2, 9) // New IDs for the new workout
+    }));
+    setExercises(copiedExercises);
+    setShowCopyModal(false);
+  };
 
   const DEFAULT_EXERCISE_MEDIA: Record<string, { url: string, type: 'image' | 'video' }> = {
     "Supino Reto com Barra": { url: "https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExM2I4YjI5YjI5YjI5YjI5YjI5YjI5YjI5YjI5YjI5YjI5YjI5JmVwPXYxX2ludGVybmFsX2dpZl9ieV9pZCZjdD1n/3o7TKMGVp9ZfXvXvXy/giphy.gif", type: 'image' },
@@ -588,14 +624,21 @@ function WorkoutBuilder({ client, onBack }: { client: any, onBack: () => void })
       // Create a date object from the selected date string, setting time to noon to avoid timezone issues
       const dateObj = new Date(`${workoutDate}T12:00:00Z`);
       
-      await addDoc(collection(db, "workouts"), {
+      const workoutData = {
         personal_id: user.id,
         client_id: client.id,
         date: dateObj.toISOString(),
         exercises,
-        status: "active"
-      });
-      alert("Treino salvo com sucesso!");
+        status: existingWorkout?.status || "active"
+      };
+
+      if (existingWorkout?.id) {
+        await updateDoc(doc(db, "workouts", existingWorkout.id), workoutData);
+        alert("Treino atualizado com sucesso!");
+      } else {
+        await addDoc(collection(db, "workouts"), workoutData);
+        alert("Treino salvo com sucesso!");
+      }
       onBack();
     } catch (err) {
       console.error(err);
@@ -612,10 +655,76 @@ function WorkoutBuilder({ client, onBack }: { client: any, onBack: () => void })
           <ArrowLeft className="w-5 h-5 text-white" />
         </button>
         <div>
-          <h2 className="text-2xl font-bold text-white">Montar Treino</h2>
+          <h2 className="text-2xl font-bold text-white">
+            {existingWorkout ? "Editar Treino" : "Montar Treino"}
+          </h2>
           <p className="text-sm text-neutral-400">Aluno: <span className="text-orange-500 font-medium">{client.name}</span></p>
         </div>
+        <div className="ml-auto">
+          <button 
+            onClick={() => setShowCopyModal(true)}
+            className="flex items-center gap-2 bg-neutral-800 hover:bg-neutral-700 text-white px-4 py-2 rounded-xl border border-white/10 transition-colors text-sm font-medium"
+          >
+            <Copy className="w-4 h-4 text-orange-500" />
+            Copiar de treino anterior
+          </button>
+        </div>
       </div>
+
+      {showCopyModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-neutral-900 w-full max-w-lg rounded-3xl border border-white/10 shadow-2xl overflow-hidden max-h-[80vh] flex flex-col">
+            <div className="p-6 border-b border-white/10 flex justify-between items-center">
+              <h3 className="text-xl font-bold text-white">Selecionar Treino Anterior</h3>
+              <button onClick={() => setShowCopyModal(false)} className="p-2 hover:bg-white/5 rounded-full transition-colors">
+                <X className="w-6 h-6 text-neutral-400" />
+              </button>
+            </div>
+            <div className="p-4 overflow-y-auto flex-1 space-y-3">
+              {pastWorkouts.length === 0 ? (
+                <div className="text-center py-12">
+                  <Activity className="w-12 h-12 text-neutral-700 mx-auto mb-4" />
+                  <p className="text-neutral-500">Nenhum treino anterior encontrado para este aluno.</p>
+                </div>
+              ) : (
+                pastWorkouts.map((workout) => (
+                  <button
+                    key={workout.id}
+                    onClick={() => copyWorkout(workout)}
+                    className="w-full text-left bg-neutral-800 hover:bg-neutral-700 p-4 rounded-2xl border border-white/5 hover:border-orange-500/50 transition-all group"
+                  >
+                    <div className="flex justify-between items-center">
+                      <div>
+                        <p className="text-white font-medium">Treino de {new Date(workout.date).toLocaleDateString('pt-BR')}</p>
+                        <p className="text-xs text-neutral-400 mt-1">{workout.exercises.length} exercícios</p>
+                      </div>
+                      <ChevronRight className="w-5 h-5 text-neutral-600 group-hover:text-orange-500 transition-colors" />
+                    </div>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {workout.exercises.slice(0, 3).map((ex: any, i: number) => (
+                        <span key={i} className="text-[10px] bg-neutral-900 text-neutral-400 px-2 py-1 rounded-md border border-white/5">
+                          {ex.name}
+                        </span>
+                      ))}
+                      {workout.exercises.length > 3 && (
+                        <span className="text-[10px] text-neutral-500">+{workout.exercises.length - 3}</span>
+                      )}
+                    </div>
+                  </button>
+                ))
+              )}
+            </div>
+            <div className="p-6 border-t border-white/10 bg-neutral-900/50">
+              <button
+                onClick={() => setShowCopyModal(false)}
+                className="w-full py-3 bg-neutral-800 hover:bg-neutral-700 text-white rounded-xl font-medium transition-colors"
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-1">
@@ -843,6 +952,7 @@ function WorkoutHistory({ client, onBack }: { client: any, onBack: () => void })
   const [workouts, setWorkouts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedWorkout, setSelectedWorkout] = useState<any>(null);
+  const [editingWorkout, setEditingWorkout] = useState<any>(null);
 
   useEffect(() => {
     fetchWorkouts();
@@ -878,6 +988,19 @@ function WorkoutHistory({ client, onBack }: { client: any, onBack: () => void })
       }
     }
   };
+
+  if (editingWorkout) {
+    return (
+      <WorkoutBuilder 
+        client={client} 
+        onBack={() => {
+          setEditingWorkout(null);
+          fetchWorkouts();
+        }} 
+        existingWorkout={editingWorkout} 
+      />
+    );
+  }
 
   if (selectedWorkout) {
     return (
@@ -931,7 +1054,13 @@ function WorkoutHistory({ client, onBack }: { client: any, onBack: () => void })
                     Treino de {new Date(workout.date).toLocaleDateString('pt-BR')}
                   </h3>
                   <p className="text-sm text-neutral-400">
-                    {workout.exercises.length} exercícios • Status: {workout.status === 'active' ? 'Ativo' : 'Concluído'}
+                    {workout.exercises.length} exercícios • Status: {workout.status === 'active' ? (
+                      <span className="text-blue-400">Ativo</span>
+                    ) : (
+                      <span className="text-emerald-400 flex items-center gap-1 inline-flex">
+                        <CheckCircle2 className="w-3 h-3" /> Concluído
+                      </span>
+                    )}
                   </p>
                 </div>
               </div>
@@ -939,12 +1068,21 @@ function WorkoutHistory({ client, onBack }: { client: any, onBack: () => void })
                 <button 
                   onClick={() => setSelectedWorkout(workout)}
                   className="p-2 text-neutral-400 hover:text-white hover:bg-neutral-800 rounded-lg transition-colors"
+                  title="Ver Detalhes"
                 >
                   <Play className="w-5 h-5" />
                 </button>
                 <button 
+                  onClick={() => setEditingWorkout(workout)}
+                  className="p-2 text-neutral-400 hover:text-orange-500 hover:bg-orange-500/10 rounded-lg transition-colors"
+                  title="Editar Treino"
+                >
+                  <Edit2 className="w-5 h-5" />
+                </button>
+                <button 
                   onClick={() => deleteWorkout(workout.id)}
                   className="p-2 text-neutral-400 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-colors"
+                  title="Excluir Treino"
                 >
                   <Trash2 className="w-5 h-5" />
                 </button>
@@ -1198,8 +1336,16 @@ function PersonalDashboard() {
 }
 
 function ClientWorkoutView({ workout, onBack }: { workout: any, onBack: () => void }) {
+  const { user } = useAuth();
   const [activeTimer, setActiveTimer] = useState<string | null>(null);
   const [timeLeft, setTimeLeft] = useState(0);
+  const [completedExercises, setCompletedExercises] = useState<string[]>(workout.completedExercises || []);
+  const [exerciseFeedback, setExerciseFeedback] = useState<Record<string, string>>(workout.exerciseFeedback || {});
+  const [overallFeedback, setOverallFeedback] = useState(workout.overallFeedback || "");
+  const [isFinishing, setIsFinishing] = useState(false);
+
+  const isPersonal = user?.role === "personal";
+  const isCompleted = workout.status === "completed";
 
   useEffect(() => {
     let interval: NodeJS.Timeout;
@@ -1227,99 +1373,218 @@ function ClientWorkoutView({ workout, onBack }: { workout: any, onBack: () => vo
     return `${m}:${s.toString().padStart(2, '0')}`;
   };
 
+  const toggleExerciseCompletion = (exerciseId: string) => {
+    if (isCompleted || isPersonal) return;
+    setCompletedExercises(prev => 
+      prev.includes(exerciseId) 
+        ? prev.filter(id => id !== exerciseId) 
+        : [...prev, exerciseId]
+    );
+  };
+
+  const handleExerciseFeedback = (exerciseId: string, feedback: string) => {
+    if (isCompleted || isPersonal) return;
+    setExerciseFeedback(prev => ({ ...prev, [exerciseId]: feedback }));
+  };
+
+  const finishWorkout = async () => {
+    if (isPersonal || isCompleted) return;
+    if (completedExercises.length === 0) {
+      if (!window.confirm("Você não marcou nenhum exercício como concluído. Deseja finalizar assim mesmo?")) {
+        return;
+      }
+    }
+
+    setIsFinishing(true);
+    try {
+      await updateDoc(doc(db, "workouts", workout.id), {
+        status: "completed",
+        completedExercises,
+        exerciseFeedback,
+        overallFeedback,
+        completedAt: new Date().toISOString()
+      });
+      alert("Treino finalizado com sucesso! Bom trabalho!");
+      onBack();
+    } catch (error) {
+      console.error("Error finishing workout:", error);
+      alert("Erro ao finalizar treino.");
+    } finally {
+      setIsFinishing(false);
+    }
+  };
+
   return (
-    <div className="space-y-6 pb-20">
-      <div className="flex items-center gap-4">
-        <button onClick={onBack} className="p-2 bg-neutral-800 hover:bg-neutral-700 rounded-xl transition-colors">
-          <ArrowLeft className="w-5 h-5 text-white" />
-        </button>
-        <div>
-          <h2 className="text-2xl font-bold text-white">Treino de Hoje</h2>
-          <p className="text-sm text-neutral-400">
-            {new Date(workout.date).toLocaleDateString('pt-BR')}
-          </p>
+    <div className="space-y-6 pb-24">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-4">
+          <button onClick={onBack} className="p-2 bg-neutral-800 hover:bg-neutral-700 rounded-xl transition-colors">
+            <ArrowLeft className="w-5 h-5 text-white" />
+          </button>
+          <div>
+            <h2 className="text-2xl font-bold text-white">
+              {isCompleted ? "Treino Concluído" : "Treino de Hoje"}
+            </h2>
+            <p className="text-sm text-neutral-400">
+              {new Date(workout.date).toLocaleDateString('pt-BR')}
+            </p>
+          </div>
         </div>
+        {isCompleted && (
+          <div className="bg-emerald-500/10 text-emerald-400 px-4 py-2 rounded-full border border-emerald-500/20 flex items-center gap-2 font-medium">
+            <CheckCircle2 className="w-5 h-5" />
+            Concluído
+          </div>
+        )}
       </div>
 
-      <div className="grid gap-4">
-        {workout.exercises.map((ex: any, index: number) => (
-          <div key={ex.id} className="bg-neutral-900 rounded-2xl border border-white/10 shadow-2xl overflow-hidden">
-            <div className="p-6">
-              <div className="flex items-start justify-between gap-4">
-                <div className="flex items-center gap-4">
-                  <div className="w-10 h-10 bg-orange-600/20 rounded-full flex items-center justify-center text-lg font-bold text-orange-500 shrink-0">
-                    {index + 1}
+      <div className="grid gap-6">
+        {workout.exercises.map((ex: any, index: number) => {
+          const isExCompleted = completedExercises.includes(ex.id);
+          return (
+            <div 
+              key={ex.id} 
+              className={`bg-neutral-900 rounded-2xl border transition-all overflow-hidden ${isExCompleted ? 'border-emerald-500/30' : 'border-white/10 shadow-2xl'}`}
+            >
+              <div className="p-6">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex items-center gap-4">
+                    <button 
+                      onClick={() => toggleExerciseCompletion(ex.id)}
+                      disabled={isPersonal || isCompleted}
+                      className={`w-10 h-10 rounded-full flex items-center justify-center text-lg font-bold transition-all shrink-0 ${
+                        isExCompleted 
+                          ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/20' 
+                          : 'bg-neutral-800 text-neutral-400 border border-white/10 hover:border-orange-500/50'
+                      }`}
+                    >
+                      {isExCompleted ? <Check className="w-6 h-6" /> : index + 1}
+                    </button>
+                    <div>
+                      <h3 className={`text-xl font-bold transition-colors ${isExCompleted ? 'text-emerald-400' : 'text-white'}`}>
+                        {ex.name}
+                      </h3>
+                      <div className="flex items-center gap-3 text-neutral-400 mt-2">
+                        {ex.isCardio ? (
+                          <span className="bg-orange-600/10 text-orange-400 px-3 py-1 rounded-lg border border-orange-500/20 font-medium italic">
+                            {ex.prescription || "Sem prescrição"}
+                          </span>
+                        ) : (
+                          <>
+                            <span className="bg-neutral-800 px-3 py-1 rounded-lg border border-white/10 font-medium">
+                              {ex.sets} séries
+                            </span>
+                            <span className="bg-neutral-800 px-3 py-1 rounded-lg border border-white/10 font-medium">
+                              {ex.reps} reps
+                            </span>
+                          </>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                  <div>
-                    <h3 className="text-xl font-bold text-white">{ex.name}</h3>
-                    <div className="flex items-center gap-3 text-neutral-400 mt-2">
-                      {ex.isCardio ? (
-                        <span className="bg-orange-600/10 text-orange-400 px-3 py-1 rounded-lg border border-orange-500/20 font-medium italic">
-                          {ex.prescription || "Sem prescrição"}
-                        </span>
+                </div>
+
+                {ex.media && (
+                  <div className="mt-4 rounded-xl overflow-hidden border border-white/5 bg-black/20">
+                    {ex.media.type === 'image' ? (
+                      <img 
+                        src={ex.media.url} 
+                        alt={ex.name} 
+                        className="w-full max-h-[300px] object-contain mx-auto"
+                        referrerPolicy="no-referrer"
+                      />
+                    ) : (
+                      <video 
+                        src={ex.media.url} 
+                        controls 
+                        className="w-full max-h-[300px] mx-auto"
+                      />
+                    )}
+                  </div>
+                )}
+
+                <div className="mt-6 space-y-4">
+                  {!ex.isCardio && !isCompleted && !isPersonal && (
+                    <div className="pt-4 border-t border-white/10">
+                      {activeTimer === ex.id ? (
+                        <div className="bg-neutral-800 rounded-xl p-6 flex flex-col items-center justify-center border border-orange-600/30">
+                          <div className="text-4xl font-mono font-bold text-orange-500 mb-2">
+                            {formatTime(timeLeft)}
+                          </div>
+                          <p className="text-sm text-neutral-400">Descansando...</p>
+                          <button 
+                            onClick={() => setActiveTimer(null)}
+                            className="mt-4 text-sm text-neutral-500 hover:text-white transition-colors"
+                          >
+                            Cancelar
+                          </button>
+                        </div>
                       ) : (
-                        <>
-                          <span className="bg-neutral-800 px-3 py-1 rounded-lg border border-white/10 font-medium">
-                            {ex.sets} séries
-                          </span>
-                          <span className="bg-neutral-800 px-3 py-1 rounded-lg border border-white/10 font-medium">
-                            {ex.reps} reps
-                          </span>
-                        </>
+                        <button
+                          onClick={() => startTimer(ex.id, ex.rest)}
+                          className="w-full bg-neutral-800 hover:bg-neutral-700 border border-white/10 text-white font-medium py-4 rounded-xl transition-colors flex items-center justify-center gap-2"
+                        >
+                          <Clock className="w-5 h-5 text-orange-500" />
+                          Iniciar Descanso ({ex.rest}s)
+                        </button>
                       )}
                     </div>
-                  </div>
+                  )}
+
+                  {(isPersonal || isCompleted || !isPersonal) && (
+                    <div className="pt-4 border-t border-white/10">
+                      <div className="flex items-center gap-2 mb-2 text-sm font-medium text-neutral-400">
+                        <MessageSquare className="w-4 h-4 text-orange-500" />
+                        Feedback do Exercício
+                      </div>
+                      {isPersonal || isCompleted ? (
+                        <p className="text-sm text-neutral-300 bg-neutral-800/50 p-3 rounded-xl border border-white/5 italic">
+                          {exerciseFeedback[ex.id] || "Nenhum feedback fornecido."}
+                        </p>
+                      ) : (
+                        <textarea
+                          value={exerciseFeedback[ex.id] || ""}
+                          onChange={(e) => handleExerciseFeedback(ex.id, e.target.value)}
+                          placeholder="Como foi este exercício? (Ex: Peso leve, dor no ombro...)"
+                          className="w-full bg-neutral-800 border border-white/10 rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:ring-2 focus:ring-orange-600 transition-all min-h-[80px]"
+                        />
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
-
-              {ex.media && (
-                <div className="mt-4 rounded-xl overflow-hidden border border-white/5 bg-black/20">
-                  {ex.media.type === 'image' ? (
-                    <img 
-                      src={ex.media.url} 
-                      alt={ex.name} 
-                      className="w-full max-h-[300px] object-contain mx-auto"
-                      referrerPolicy="no-referrer"
-                    />
-                  ) : (
-                    <video 
-                      src={ex.media.url} 
-                      controls 
-                      className="w-full max-h-[300px] mx-auto"
-                    />
-                  )}
-                </div>
-              )}
-
-              {!ex.isCardio && (
-                <div className="mt-6 pt-6 border-t border-white/10">
-                  {activeTimer === ex.id ? (
-                    <div className="bg-neutral-800 rounded-xl p-6 flex flex-col items-center justify-center border border-orange-600/30">
-                      <div className="text-4xl font-mono font-bold text-orange-500 mb-2">
-                        {formatTime(timeLeft)}
-                      </div>
-                      <p className="text-sm text-neutral-400">Descansando...</p>
-                      <button 
-                        onClick={() => setActiveTimer(null)}
-                        className="mt-4 text-sm text-neutral-500 hover:text-white transition-colors"
-                      >
-                        Cancelar
-                      </button>
-                    </div>
-                  ) : (
-                    <button
-                      onClick={() => startTimer(ex.id, ex.rest)}
-                      className="w-full bg-neutral-800 hover:bg-neutral-700 border border-white/10 text-white font-medium py-4 rounded-xl transition-colors flex items-center justify-center gap-2"
-                    >
-                      <Clock className="w-5 h-5 text-orange-500" />
-                      Iniciar Descanso ({ex.rest}s)
-                    </button>
-                  )}
-                </div>
-              )}
             </div>
-          </div>
-        ))}
+          );
+        })}
+      </div>
+
+      <div className="bg-neutral-900 rounded-2xl border border-white/10 shadow-2xl p-6 mt-8">
+        <h3 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
+          <MessageSquare className="w-6 h-6 text-orange-500" />
+          Feedback Geral do Treino
+        </h3>
+        {isPersonal || isCompleted ? (
+          <p className="text-neutral-300 bg-neutral-800/50 p-4 rounded-xl border border-white/5 italic">
+            {overallFeedback || "Nenhum feedback geral fornecido."}
+          </p>
+        ) : (
+          <textarea
+            value={overallFeedback}
+            onChange={(e) => setOverallFeedback(e.target.value)}
+            placeholder="Conte ao seu personal como foi o treino de hoje no geral..."
+            className="w-full bg-neutral-800 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-orange-600 transition-all min-h-[120px]"
+          />
+        )}
+
+        {!isPersonal && !isCompleted && (
+          <button
+            onClick={finishWorkout}
+            disabled={isFinishing}
+            className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold py-4 rounded-xl transition-all transform active:scale-95 flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/20 mt-8"
+          >
+            {isFinishing ? "Finalizando..." : <><CheckCircle2 className="w-6 h-6" /> Finalizar Treino</>}
+          </button>
+        )}
       </div>
     </div>
   );
@@ -1428,8 +1693,12 @@ function ClientDashboard() {
                     <p className="text-xs text-neutral-500">{new Date(workout.date).toLocaleDateString('pt-BR')}</p>
                   </div>
                   <div className="flex items-center gap-3">
-                    <span className="text-xs font-medium text-emerald-400 bg-emerald-500/10 px-2 py-1 rounded">
-                      {workout.exercises.length} exercícios
+                    <span className={`text-xs font-medium px-2 py-1 rounded border ${
+                      workout.status === 'completed' 
+                        ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' 
+                        : 'text-blue-400 bg-blue-500/10 border-blue-500/20'
+                    }`}>
+                      {workout.status === 'completed' ? 'Concluído' : `${workout.exercises.length} exercícios`}
                     </span>
                     <Play className="w-4 h-4 text-neutral-500" />
                   </div>
