@@ -1298,7 +1298,7 @@ function ChatModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
-      <div className="bg-neutral-900 w-full max-w-lg h-[600px] rounded-3xl border border-white/10 shadow-2xl flex flex-col overflow-hidden">
+      <div className="bg-neutral-900 w-full max-w-lg h-[600px] max-h-[90vh] rounded-3xl border border-white/10 shadow-2xl flex flex-col overflow-hidden">
         {/* Header */}
         <div className="p-4 border-b border-white/10 flex items-center justify-between bg-neutral-950">
           <div className="flex items-center gap-3">
@@ -1460,6 +1460,25 @@ function PersonalDashboard() {
   if (selectedClient) {
     return (
       <div className="space-y-6">
+        <div className="flex items-center justify-between gap-4 bg-neutral-900 p-4 rounded-2xl border border-white/10 shadow-xl">
+          <div className="flex items-center gap-3">
+            <button onClick={() => setSelectedClient(null)} className="p-2 hover:bg-white/5 rounded-xl transition-colors">
+              <ArrowLeft className="w-5 h-5 text-white" />
+            </button>
+            <div>
+              <h2 className="text-lg font-bold text-white leading-tight">{selectedClient.displayName || selectedClient.name}</h2>
+              <p className="text-[10px] text-neutral-500 uppercase tracking-wider">Perfil do Aluno</p>
+            </div>
+          </div>
+          <button
+            onClick={() => setChatRoom({ id: `chat_${user?.id}_${selectedClient.id}`, name: selectedClient.displayName || selectedClient.name })}
+            className="flex items-center gap-2 bg-orange-600 hover:bg-orange-500 text-white px-4 py-2 rounded-xl transition-all shadow-lg shadow-orange-600/20 font-bold text-sm"
+          >
+            <MessageSquare className="w-4 h-4" />
+            Chat
+          </button>
+        </div>
+
         <div className="flex bg-neutral-900 p-1 rounded-xl border border-white/10 shadow-2xl w-full max-w-lg mx-auto mb-6">
           <button
             onClick={() => setClientTab("workouts")}
@@ -1589,15 +1608,27 @@ function PersonalDashboard() {
                       onClick={() => setSelectedClient(client)}
                     >
                       <td className="px-4 py-3">
-                        <div className="flex items-center gap-3">
-                          {client.photoUrl ? (
-                            <img src={client.photoUrl} alt="Profile" className="w-8 h-8 rounded-full object-cover border border-blue-500 shrink-0" />
-                          ) : (
-                            <div className="w-8 h-8 bg-neutral-800 rounded-full flex items-center justify-center text-xs font-bold text-neutral-400 shrink-0">
-                              {(client.displayName || client.name)?.charAt(0).toUpperCase() || '?'}
-                            </div>
-                          )}
-                          <span className="font-medium text-white whitespace-nowrap">{client.displayName || client.name}</span>
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="flex items-center gap-3">
+                            {client.photoUrl ? (
+                              <img src={client.photoUrl} alt="Profile" className="w-8 h-8 rounded-full object-cover border border-blue-500 shrink-0" />
+                            ) : (
+                              <div className="w-8 h-8 bg-neutral-800 rounded-full flex items-center justify-center text-xs font-bold text-neutral-400 shrink-0">
+                                {(client.displayName || client.name)?.charAt(0).toUpperCase() || '?'}
+                              </div>
+                            )}
+                            <span className="font-medium text-white whitespace-nowrap">{client.displayName || client.name}</span>
+                          </div>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setChatRoom({ id: `chat_${user?.id}_${client.id}`, name: client.displayName || client.name });
+                            }}
+                            className="p-2 text-orange-500 hover:bg-orange-500/10 rounded-lg transition-colors sm:hidden"
+                            title="Abrir Chat"
+                          >
+                            <MessageSquare className="w-5 h-5" />
+                          </button>
                         </div>
                       </td>
                       <td className="px-4 py-3 hidden sm:table-cell">{client.email}</td>
@@ -1609,7 +1640,7 @@ function PersonalDashboard() {
                               e.stopPropagation();
                               setChatRoom({ id: `chat_${user?.id}_${client.id}`, name: client.displayName || client.name });
                             }}
-                            className="p-2 text-orange-500 hover:bg-orange-500/10 rounded-lg transition-colors"
+                            className="p-2 text-orange-500 hover:bg-orange-500/10 rounded-lg transition-colors hidden sm:block"
                             title="Abrir Chat"
                           >
                             <MessageSquare className="w-5 h-5" />
@@ -1648,9 +1679,24 @@ function ClientWorkoutView({ workout, onBack, isPersonal: isPersonalProp }: { wo
   const [exerciseLoads, setExerciseLoads] = useState<Record<string, string>>(workout.exerciseLoads || {});
   const [overallFeedback, setOverallFeedback] = useState(workout.overallFeedback || "");
   const [isFinishing, setIsFinishing] = useState(false);
+  const [chatRoom, setChatRoom] = useState<{ id: string; name: string } | null>(null);
+  const [recipientName, setRecipientName] = useState("Carregando...");
 
   const isPersonal = isPersonalProp !== undefined ? isPersonalProp : user?.role === "personal";
   const isCompleted = workout.status === "completed";
+
+  useEffect(() => {
+    const fetchRecipient = async () => {
+      const recipientId = isPersonal ? workout.client_id : workout.personal_id;
+      const docRef = doc(db, "users", recipientId);
+      const docSnap = await getDoc(docRef);
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        setRecipientName(data.displayName || data.name || "Usuário");
+      }
+    };
+    fetchRecipient();
+  }, [isPersonal, workout.client_id, workout.personal_id]);
 
   const deleteWorkout = async () => {
     console.log("ClientWorkoutView: Deleting workout:", workout.id);
@@ -1755,23 +1801,33 @@ function ClientWorkoutView({ workout, onBack, isPersonal: isPersonalProp }: { wo
 
   return (
     <div className="space-y-6 pb-24">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between bg-neutral-900 p-4 rounded-2xl border border-white/10 shadow-xl">
         <div className="flex items-center gap-4">
           <button onClick={onBack} className="p-2 bg-neutral-800 hover:bg-neutral-700 rounded-xl transition-colors">
             <ArrowLeft className="w-5 h-5 text-white" />
           </button>
           <div>
-            <h2 className="text-2xl font-bold text-white">
+            <h2 className="text-xl font-bold text-white leading-tight">
               {isCompleted ? "Treino Concluído" : "Treino de Hoje"}
             </h2>
-            <p className="text-sm text-neutral-400">
+            <p className="text-xs text-neutral-400">
               {new Date(workout.date).toLocaleDateString('pt-BR')}
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setChatRoom({ 
+              id: isPersonal ? `chat_${user?.id}_${workout.client_id}` : `chat_${workout.personal_id}_${user?.id}`, 
+              name: recipientName 
+            })}
+            className="flex items-center gap-2 bg-orange-600/10 hover:bg-orange-600 text-orange-500 hover:text-white px-3 py-2 rounded-xl border border-orange-500/20 transition-all font-bold text-xs"
+          >
+            <MessageSquare className="w-4 h-4" />
+            Chat
+          </button>
           {isCompleted && (
-            <div className="bg-emerald-500/10 text-emerald-400 px-4 py-2 rounded-full border border-emerald-500/20 flex items-center gap-2 font-medium">
+            <div className="hidden sm:flex bg-emerald-500/10 text-emerald-400 px-4 py-2 rounded-full border border-emerald-500/20 items-center gap-2 font-medium">
               <CheckCircle2 className="w-5 h-5" />
               Concluído
             </div>
@@ -1787,6 +1843,14 @@ function ClientWorkoutView({ workout, onBack, isPersonal: isPersonalProp }: { wo
           )}
         </div>
       </div>
+
+      {chatRoom && (
+        <ChatModal 
+          roomId={chatRoom.id} 
+          recipientName={chatRoom.name} 
+          onClose={() => setChatRoom(null)} 
+        />
+      )}
 
       <div className="grid gap-6">
         {workout.exercises.map((ex: any, index: number) => {
