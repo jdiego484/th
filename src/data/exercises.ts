@@ -1,0 +1,88 @@
+export const EXERCISES = [
+  // Musculação - Peito
+  "Supino Reto com Barra",
+  "Supino Inclinado com Halteres",
+  "Crucifixo Reto",
+  "Crossover",
+  "Voador (Peck Deck)",
+  "Supino Declinado",
+  "Pullover",
+  
+  // Musculação - Costas
+  "Puxada Frontal",
+  "Remada Curvada com Barra",
+  "Remada Baixa (Triângulo)",
+  "Remada Unilateral (Serrote)",
+  "Levantamento Terra",
+  "Barra Fixa",
+  "Pulldown",
+
+  // Musculação - Pernas
+  "Agachamento Livre",
+  "Leg Press 45º",
+  "Cadeira Extensora",
+  "Mesa Flexora",
+  "Cadeira Flexora",
+  "Stiff",
+  "Elevação Pélvica",
+  "Cadeira Abdutora",
+  "Cadeira Adutora",
+  "Panturrilha no Leg Press",
+  "Panturrilha Sentado",
+
+  // Musculação - Ombros
+  "Desenvolvimento com Halteres",
+  "Desenvolvimento com Barra",
+  "Elevação Lateral",
+  "Elevação Frontal",
+  "Crucifixo Invertido",
+  "Encolhimento de Ombros",
+
+  // Musculação - Braços (Bíceps e Tríceps)
+  "Rosca Direta com Barra",
+  "Rosca Alternada",
+  "Rosca Scott",
+  "Rosca Martelo",
+  "Tríceps Pulley",
+  "Tríceps Testa",
+  "Tríceps Francês",
+  "Mergulho nas Paralelas",
+  "Tríceps Banco",
+
+  // Crossfit & LPO
+  "Snatch (Arranco)",
+  "Clean and Jerk (Arremesso)",
+  "Power Clean",
+  "Hang Power Clean",
+  "Thruster",
+  "Wall Ball",
+  "Kettlebell Swing",
+  "Box Jump (Salto na Caixa)",
+  "Double Unders (Corda)",
+  "Burpee",
+  "Burpee Box Jump Over",
+  "Toes to Bar (Pé na Barra)",
+  "Pull-up (Kipping/Butterfly)",
+  "Chest to Bar",
+  "Muscle-up (Barra/Argola)",
+  "Handstand Push-up (HSPU)",
+  "Handstand Walk",
+  "Rope Climb (Subida na Corda)",
+
+  // Funcional & Peso Corporal
+  "Flexão de Braços",
+  "Agachamento com Salto",
+  "Afundo",
+  "Passada (Walking Lunge)",
+  "Prancha Abdominal",
+  "Prancha Lateral",
+  "Abdominal Supra",
+  "Abdominal Infra",
+  "Abdominal Remador",
+  "Abdominal Bicicleta",
+  "Mountain Climber",
+  "Polichinelo",
+  "Burpee Funcional",
+  "Ponte Glútea",
+  "Superman (Extensão Lombar)"
+].sort();
