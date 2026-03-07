@@ -1,6 +1,6 @@
 import { useState, useEffect, createContext, useContext, ReactNode, FormEvent, ChangeEvent } from "react";
 import { BrowserRouter, Routes, Route, Navigate, useNavigate } from "react-router-dom";
-import { User, LogOut, Users, Dumbbell, Activity, Search, Plus, ArrowLeft, Clock, Play, Check, Trash2, ChevronLeft, ChevronRight, Calendar as CalendarIcon } from "lucide-react";
+import { User, LogOut, Users, Dumbbell, Activity, Search, Plus, ArrowLeft, Clock, Play, Check, Trash2, ChevronLeft, ChevronRight, Calendar as CalendarIcon, AlertTriangle, Image as ImageIcon, Video, Upload, X } from "lucide-react";
 import { auth, db } from "./firebase";
 import { EXERCISES } from "./data/exercises";
 import { AssessmentView } from "./components/AssessmentView";
@@ -8,7 +8,9 @@ import {
   createUserWithEmailAndPassword, 
   signInWithEmailAndPassword, 
   signOut, 
-  onAuthStateChanged 
+  onAuthStateChanged,
+  sendPasswordResetEmail,
+  deleteUser
 } from "firebase/auth";
 import { 
   doc, 
@@ -20,7 +22,8 @@ import {
   getDocs, 
   addDoc,
   updateDoc,
-  onSnapshot
+  onSnapshot,
+  deleteDoc
 } from "firebase/firestore";
 
 type UserType = {
@@ -54,20 +57,6 @@ function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     console.log("AuthProvider: Iniciando monitoramento...");
-    
-    // Teste de conexão com Firestore
-    const checkConnection = async () => {
-      try {
-        await getDoc(doc(db, "_health", "check"));
-        console.log("AuthProvider: Conexão com Firestore OK");
-      } catch (error: any) {
-        console.error("AuthProvider: Falha na conexão com Firestore:", error);
-        if (error.code === "permission-denied") {
-          console.warn("AuthProvider: Firestore está bloqueado por regras de segurança.");
-        }
-      }
-    };
-    checkConnection();
     
     const unsubscribeAuth = onAuthStateChanged(auth, (firebaseUser) => {
       if (firebaseUser) {
@@ -137,6 +126,7 @@ function useAuth() {
 
 function Login() {
   const [isLogin, setIsLogin] = useState(true);
+  const [isForgotPassword, setIsForgotPassword] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -144,6 +134,7 @@ function Login() {
   const [role, setRole] = useState<"personal" | "client">("client");
   const [personalCode, setPersonalCode] = useState("");
   const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const { user, loading } = useAuth();
   const navigate = useNavigate();
@@ -154,9 +145,30 @@ function Login() {
     }
   }, [user, navigate]);
 
+  const handleForgotPassword = async (e?: FormEvent) => {
+    if (e) e.preventDefault();
+    if (!email) {
+      setError("Por favor, insira seu e-mail para recuperar a senha.");
+      return;
+    }
+    setError("");
+    setSuccess("");
+    setIsSubmitting(true);
+    try {
+      await sendPasswordResetEmail(auth, email);
+      setSuccess("E-mail de recuperação enviado! Verifique sua caixa de entrada.");
+    } catch (err: any) {
+      console.error("Reset password error:", err);
+      setError("Erro ao enviar e-mail de recuperação. Verifique se o e-mail está correto.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setError("");
+    setSuccess("");
     setIsSubmitting(true);
 
     const isFirebaseConfigured = true; // Firebase is hardcoded in firebase.ts
@@ -249,7 +261,7 @@ function Login() {
           <p className="text-sm text-neutral-400 mt-1 italic">O seu personal 24 horas</p>
         </div>
         <h2 className="text-xl font-bold text-white text-center mb-6">
-          {isLogin ? "Bem-vindo de volta" : "Criar Conta"}
+          {isForgotPassword ? "Recuperar Senha" : (isLogin ? "Bem-vindo de volta" : "Criar Conta")}
         </h2>
         
         {error && (
@@ -258,8 +270,14 @@ function Login() {
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          {!isLogin && (
+        {success && (
+          <div className="bg-emerald-500/10 border border-emerald-500/50 text-emerald-400 p-3 rounded-xl mb-6 text-sm text-center">
+            {success}
+          </div>
+        )}
+
+        <form onSubmit={isForgotPassword ? handleForgotPassword : handleSubmit} className="space-y-4">
+          {!isLogin && !isForgotPassword && (
             <div>
               <label className="block text-sm font-medium text-neutral-400 mb-1">Nome Completo</label>
               <input
@@ -285,19 +303,21 @@ function Login() {
             />
           </div>
 
-          <div>
-            <label className="block text-sm font-medium text-neutral-400 mb-1">Senha</label>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="w-full bg-neutral-800 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-orange-600 focus:border-transparent transition-all"
-              placeholder="••••••••"
-              required
-            />
-          </div>
+          {!isForgotPassword && (
+            <div>
+              <label className="block text-sm font-medium text-neutral-400 mb-1">Senha</label>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full bg-neutral-800 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-orange-600 focus:border-transparent transition-all"
+                placeholder="••••••••"
+                required
+              />
+            </div>
+          )}
 
-          {!isLogin && (
+          {!isLogin && !isForgotPassword && (
             <div>
               <label className="block text-sm font-medium text-neutral-400 mb-1">Confirmar Senha</label>
               <input
@@ -311,7 +331,7 @@ function Login() {
             </div>
           )}
 
-          {!isLogin && (
+          {!isLogin && !isForgotPassword && (
             <div>
               <label className="block text-sm font-medium text-neutral-400 mb-2">Eu sou um...</label>
               <div className="grid grid-cols-2 gap-4">
@@ -341,7 +361,7 @@ function Login() {
             </div>
           )}
 
-          {!isLogin && role === "client" && (
+          {!isLogin && !isForgotPassword && role === "client" && (
             <div>
               <label className="block text-sm font-medium text-neutral-400 mb-1">Código do Personal (Opcional)</label>
               <input
@@ -359,15 +379,49 @@ function Login() {
             disabled={isSubmitting}
             className="w-full bg-orange-600 hover:bg-orange-500 disabled:opacity-50 text-white font-bold py-4 rounded-xl transition-all transform active:scale-95 shadow-lg shadow-orange-600/20 mt-6"
           >
-            {isSubmitting ? "Por favor, aguarde..." : (isLogin ? "Entrar" : "Criar Conta")}
+            {isSubmitting ? "Por favor, aguarde..." : (isForgotPassword ? "Enviar E-mail de Recuperação" : (isLogin ? "Entrar" : "Criar Conta"))}
           </button>
         </form>
+
+        {isLogin && !isForgotPassword && (
+          <div className="mt-4 text-center">
+            <button
+              type="button"
+              onClick={() => {
+                setIsForgotPassword(true);
+                setError("");
+                setSuccess("");
+              }}
+              className="text-neutral-500 hover:text-white transition-colors text-xs font-medium"
+            >
+              Esqueceu sua senha? Clique aqui para recuperar
+            </button>
+          </div>
+        )}
+
+        {isForgotPassword && (
+          <div className="mt-4 text-center">
+            <button
+              type="button"
+              onClick={() => {
+                setIsForgotPassword(false);
+                setError("");
+                setSuccess("");
+              }}
+              className="text-neutral-500 hover:text-white transition-colors text-xs font-medium"
+            >
+              Voltar para o login
+            </button>
+          </div>
+        )}
 
         <div className="mt-6 text-center">
           <button
             onClick={() => {
               setIsLogin(!isLogin);
+              setIsForgotPassword(false);
               setError("");
+              setSuccess("");
             }}
             className="text-emerald-400 hover:text-emerald-300 transition-colors text-sm font-medium"
           >
@@ -460,9 +514,37 @@ function WorkoutBuilder({ client, onBack }: { client: any, onBack: () => void })
   const [sets, setSets] = useState("3");
   const [reps, setReps] = useState("10");
   const [rest, setRest] = useState("60"); // seconds
+  const [prescription, setPrescription] = useState(""); // For cardio
   const [workoutDate, setWorkoutDate] = useState(new Date().toISOString().split('T')[0]);
   const [isSaving, setIsSaving] = useState(false);
   const [showExerciseList, setShowExerciseList] = useState(false);
+  const [media, setMedia] = useState<{ url: string, type: 'image' | 'video' } | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+
+  const DEFAULT_EXERCISE_MEDIA: Record<string, { url: string, type: 'image' | 'video' }> = {
+    "Supino Reto com Barra": { url: "https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExM2I4YjI5YjI5YjI5YjI5YjI5YjI5YjI5YjI5YjI5YjI5YjI5JmVwPXYxX2ludGVybmFsX2dpZl9ieV9pZCZjdD1n/3o7TKMGVp9ZfXvXvXy/giphy.gif", type: 'image' },
+    "Agachamento Livre": { url: "https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExM2I4YjI5YjI5YjI5YjI5YjI5YjI5YjI5YjI5YjI5YjI5YjI5JmVwPXYxX2ludGVybmFsX2dpZl9ieV9pZCZjdD1n/3o7TKMGVp9ZfXvXvXy/giphy.gif", type: 'image' },
+    // Adicionar mais conforme necessário ou usar um placeholder
+  };
+
+  const handleFileChange = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsUploading(true);
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setMedia({
+        url: reader.result as string,
+        type: file.type.startsWith('video') ? 'video' : 'image'
+      });
+      setIsUploading(false);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const CARDIO_EXERCISES = ["Esteira", "Eliptico", "Simulador de Escadas", "Bike"];
+  const isCardio = CARDIO_EXERCISES.includes(currentExercise);
 
   const filteredExercises = EXERCISES.filter(ex => 
     ex.toLowerCase().includes(currentExercise.toLowerCase())
@@ -470,17 +552,28 @@ function WorkoutBuilder({ client, onBack }: { client: any, onBack: () => void })
 
   const addExercise = () => {
     if (!currentExercise.trim()) return;
-    setExercises([...exercises, {
+    
+    // Get default media if none uploaded
+    const finalMedia = media || DEFAULT_EXERCISE_MEDIA[currentExercise] || { 
+      url: `https://picsum.photos/seed/${currentExercise}/400/300`, 
+      type: 'image' 
+    };
+
+    const newExercise = {
       id: Math.random().toString(36).substring(2, 9),
       name: currentExercise,
-      sets,
-      reps,
-      rest: parseInt(rest) || 60
-    }]);
+      isCardio,
+      media: finalMedia,
+      ...(isCardio ? { prescription } : { sets, reps, rest: parseInt(rest) || 60 })
+    };
+
+    setExercises([...exercises, newExercise]);
     setCurrentExercise("");
     setSets("3");
     setReps("10");
     setRest("60");
+    setPrescription("");
+    setMedia(null);
     setShowExerciseList(false);
   };
 
@@ -538,7 +631,7 @@ function WorkoutBuilder({ client, onBack }: { client: any, onBack: () => void })
               </span>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
-              <div className="md:col-span-5 relative">
+              <div className={isCardio ? "md:col-span-5 relative" : "md:col-span-4 relative"}>
                 <label className="block text-sm font-medium text-neutral-400 mb-1">Exercício</label>
                 <input
                   type="text"
@@ -549,6 +642,16 @@ function WorkoutBuilder({ client, onBack }: { client: any, onBack: () => void })
                   }}
                   onFocus={() => setShowExerciseList(true)}
                   onBlur={() => setTimeout(() => setShowExerciseList(false), 200)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      if (filteredExercises.length > 0 && showExerciseList) {
+                        setCurrentExercise(filteredExercises[0]);
+                        setShowExerciseList(false);
+                      } else {
+                        addExercise();
+                      }
+                    }
+                  }}
                   className="w-full bg-neutral-800 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-orange-600"
                   placeholder="Ex: Supino Reto"
                 />
@@ -559,7 +662,7 @@ function WorkoutBuilder({ client, onBack }: { client: any, onBack: () => void })
                         <div 
                           key={i} 
                           className="px-4 py-2 hover:bg-orange-600/20 cursor-pointer text-white text-sm"
-                          onClick={() => {
+                          onMouseDown={() => {
                             setCurrentExercise(ex);
                             setShowExerciseList(false);
                           }}
@@ -575,37 +678,91 @@ function WorkoutBuilder({ client, onBack }: { client: any, onBack: () => void })
                   </div>
                 )}
               </div>
-              <div className="md:col-span-2">
-                <label className="block text-sm font-medium text-neutral-400 mb-1">Séries</label>
-                <input
-                  type="text"
-                  value={sets}
-                  onChange={(e) => setSets(e.target.value)}
-                  className="w-full bg-neutral-800 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-orange-600 text-center"
-                />
+
+              {isCardio ? (
+                <div className="md:col-span-5">
+                  <label className="block text-sm font-medium text-neutral-400 mb-1">Prescrição</label>
+                  <input
+                    type="text"
+                    value={prescription}
+                    onChange={(e) => setPrescription(e.target.value)}
+                    className="w-full bg-neutral-800 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-orange-600"
+                    placeholder="Ex: 20 min, moderado"
+                  />
+                </div>
+              ) : (
+                <>
+                  <div className="md:col-span-2">
+                    <label className="block text-sm font-medium text-neutral-400 mb-1">Séries</label>
+                    <input
+                      type="text"
+                      value={sets}
+                      onChange={(e) => setSets(e.target.value)}
+                      className="w-full bg-neutral-800 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-orange-600 text-center"
+                    />
+                  </div>
+                  <div className="md:col-span-2">
+                    <label className="block text-sm font-medium text-neutral-400 mb-1">Reps</label>
+                    <input
+                      type="text"
+                      value={reps}
+                      onChange={(e) => setReps(e.target.value)}
+                      className="w-full bg-neutral-800 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-orange-600 text-center"
+                    />
+                  </div>
+                  <div className="md:col-span-2">
+                    <label className="block text-sm font-medium text-neutral-400 mb-1">Desc. (s)</label>
+                    <input
+                      type="number"
+                      value={rest}
+                      onChange={(e) => setRest(e.target.value)}
+                      className="w-full bg-neutral-800 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-orange-600 text-center"
+                    />
+                  </div>
+                </>
+              )}
+
+              <div className="md:col-span-1">
+                <label className="block text-sm font-medium text-neutral-400 mb-1 text-center">Mídia</label>
+                <div className="relative group">
+                  <input
+                    type="file"
+                    accept="image/*,video/*"
+                    onChange={handleFileChange}
+                    className="hidden"
+                    id="media-upload"
+                  />
+                  <label
+                    htmlFor="media-upload"
+                    className={`w-full h-[50px] bg-neutral-800 border-2 border-dashed ${media ? 'border-orange-600' : 'border-white/10'} rounded-xl flex items-center justify-center cursor-pointer hover:bg-neutral-700 transition-all group overflow-hidden`}
+                  >
+                    {isUploading ? (
+                      <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-orange-600"></div>
+                    ) : media ? (
+                      media.type === 'image' ? (
+                        <img src={media.url} alt="Preview" className="w-full h-full object-cover" />
+                      ) : (
+                        <Video className="w-5 h-5 text-orange-500" />
+                      )
+                    ) : (
+                      <Upload className="w-5 h-5 text-neutral-500 group-hover:text-orange-500" />
+                    )}
+                  </label>
+                  {media && (
+                    <button 
+                      onClick={() => setMedia(null)}
+                      className="absolute -top-2 -right-2 bg-red-500 text-white p-1 rounded-full shadow-lg opacity-0 group-hover:opacity-100 transition-opacity"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  )}
+                </div>
               </div>
-              <div className="md:col-span-2">
-                <label className="block text-sm font-medium text-neutral-400 mb-1">Repetições</label>
-                <input
-                  type="text"
-                  value={reps}
-                  onChange={(e) => setReps(e.target.value)}
-                  className="w-full bg-neutral-800 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-orange-600 text-center"
-                />
-              </div>
-              <div className="md:col-span-2">
-                <label className="block text-sm font-medium text-neutral-400 mb-1">Intervalo (s)</label>
-                <input
-                  type="number"
-                  value={rest}
-                  onChange={(e) => setRest(e.target.value)}
-                  className="w-full bg-neutral-800 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-orange-600 text-center"
-                />
-              </div>
+              
               <div className="md:col-span-1">
                 <button
                   onClick={addExercise}
-                  disabled={!currentExercise.trim()}
+                  disabled={!currentExercise.trim() || isUploading}
                   className="w-full bg-orange-600 hover:bg-orange-500 disabled:opacity-50 text-white p-3 rounded-xl flex items-center justify-center transition-colors h-[50px] shadow-lg shadow-orange-600/20"
                 >
                   <Plus className="w-5 h-5" />
@@ -629,14 +786,29 @@ function WorkoutBuilder({ client, onBack }: { client: any, onBack: () => void })
                       <div className="w-8 h-8 bg-neutral-800 rounded-full flex items-center justify-center text-sm font-bold text-neutral-400 shrink-0 border border-white/10">
                         {index + 1}
                       </div>
+                      <div className="w-12 h-12 bg-neutral-800 rounded-lg overflow-hidden border border-white/10 shrink-0">
+                        {ex.media?.type === 'image' ? (
+                          <img src={ex.media.url} alt="" className="w-full h-full object-cover" />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center bg-orange-600/10">
+                            <Video className="w-5 h-5 text-orange-500" />
+                          </div>
+                        )}
+                      </div>
                       <div>
                         <h4 className="font-medium text-white">{ex.name}</h4>
                         <div className="flex items-center gap-3 text-sm text-neutral-400 mt-1">
-                          <span>{ex.sets} séries</span>
-                          <span className="w-1 h-1 bg-neutral-600 rounded-full"></span>
-                          <span>{ex.reps} reps</span>
-                          <span className="w-1 h-1 bg-neutral-600 rounded-full"></span>
-                          <span className="flex items-center gap-1 text-blue-400"><Clock className="w-3 h-3" /> {ex.rest}s descanso</span>
+                          {ex.isCardio ? (
+                            <span className="text-orange-400 italic">{ex.prescription || "Sem prescrição"}</span>
+                          ) : (
+                            <>
+                              <span>{ex.sets} séries</span>
+                              <span className="w-1 h-1 bg-neutral-600 rounded-full"></span>
+                              <span>{ex.reps} reps</span>
+                              <span className="w-1 h-1 bg-neutral-600 rounded-full"></span>
+                              <span className="flex items-center gap-1 text-blue-400"><Clock className="w-3 h-3" /> {ex.rest}s descanso</span>
+                            </>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -666,6 +838,125 @@ function WorkoutBuilder({ client, onBack }: { client: any, onBack: () => void })
   );
 }
 
+function WorkoutHistory({ client, onBack }: { client: any, onBack: () => void }) {
+  const { user } = useAuth();
+  const [workouts, setWorkouts] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedWorkout, setSelectedWorkout] = useState<any>(null);
+
+  useEffect(() => {
+    fetchWorkouts();
+  }, [client.id]);
+
+  const fetchWorkouts = async () => {
+    if (!user) return;
+    setLoading(true);
+    try {
+      const q = query(
+        collection(db, "workouts"), 
+        where("client_id", "==", client.id),
+        where("personal_id", "==", user.id)
+      );
+      const querySnapshot = await getDocs(q);
+      const workoutsData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      workoutsData.sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      setWorkouts(workoutsData);
+    } catch (error) {
+      console.error("Error fetching workouts:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const deleteWorkout = async (id: string) => {
+    if (window.confirm("Tem certeza que deseja excluir este treino?")) {
+      try {
+        await deleteDoc(doc(db, "workouts", id));
+        setWorkouts(workouts.filter(w => w.id !== id));
+      } catch (error) {
+        console.error("Error deleting workout:", error);
+      }
+    }
+  };
+
+  if (selectedWorkout) {
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center gap-4">
+          <button onClick={() => setSelectedWorkout(null)} className="p-2 bg-neutral-800 hover:bg-neutral-700 rounded-xl transition-colors">
+            <ArrowLeft className="w-5 h-5 text-white" />
+          </button>
+          <h2 className="text-2xl font-bold text-white">Detalhes do Treino</h2>
+        </div>
+        <ClientWorkoutView workout={selectedWorkout} onBack={() => setSelectedWorkout(null)} />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center gap-4">
+        <button onClick={onBack} className="p-2 bg-neutral-800 hover:bg-neutral-700 rounded-xl transition-colors">
+          <ArrowLeft className="w-5 h-5 text-white" />
+        </button>
+        <div>
+          <h2 className="text-2xl font-bold text-white">Histórico de Treinos</h2>
+          <p className="text-sm text-neutral-400">Aluno: <span className="text-orange-500 font-medium">{client.name}</span></p>
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="flex justify-center py-12">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-orange-600"></div>
+        </div>
+      ) : workouts.length === 0 ? (
+        <div className="bg-neutral-900 p-12 rounded-2xl border border-white/10 shadow-2xl text-center">
+          <Activity className="w-12 h-12 text-neutral-700 mx-auto mb-4" />
+          <h3 className="text-xl font-medium text-white mb-2">Nenhum treino encontrado</h3>
+          <p className="text-neutral-500">Este aluno ainda não possui treinos registrados.</p>
+        </div>
+      ) : (
+        <div className="grid gap-4">
+          {workouts.map((workout) => (
+            <div 
+              key={workout.id}
+              className="bg-neutral-900 p-6 rounded-2xl border border-white/10 shadow-2xl flex items-center justify-between hover:border-orange-600/50 transition-colors group"
+            >
+              <div className="flex items-center gap-4 cursor-pointer flex-1" onClick={() => setSelectedWorkout(workout)}>
+                <div className="w-12 h-12 bg-orange-600/10 rounded-full flex items-center justify-center">
+                  <CalendarIcon className="w-6 h-6 text-orange-500" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-medium text-white">
+                    Treino de {new Date(workout.date).toLocaleDateString('pt-BR')}
+                  </h3>
+                  <p className="text-sm text-neutral-400">
+                    {workout.exercises.length} exercícios • Status: {workout.status === 'active' ? 'Ativo' : 'Concluído'}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button 
+                  onClick={() => setSelectedWorkout(workout)}
+                  className="p-2 text-neutral-400 hover:text-white hover:bg-neutral-800 rounded-lg transition-colors"
+                >
+                  <Play className="w-5 h-5" />
+                </button>
+                <button 
+                  onClick={() => deleteWorkout(workout.id)}
+                  className="p-2 text-neutral-400 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-colors"
+                >
+                  <Trash2 className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function PersonalDashboard() {
   const { user } = useAuth();
   const [clients, setClients] = useState<any[]>([]);
@@ -673,7 +964,7 @@ function PersonalDashboard() {
   const [showAdd, setShowAdd] = useState(false);
   const [sortBy, setSortBy] = useState<"name" | "date">("name");
   const [selectedClient, setSelectedClient] = useState<any>(null);
-  const [clientTab, setClientTab] = useState<"workouts" | "assessments">("workouts");
+  const [clientTab, setClientTab] = useState<"workouts" | "history" | "assessments">("workouts");
 
   useEffect(() => {
     if (user) {
@@ -747,12 +1038,18 @@ function PersonalDashboard() {
   if (selectedClient) {
     return (
       <div className="space-y-6">
-        <div className="flex bg-neutral-900 p-1 rounded-xl border border-white/10 shadow-2xl w-full max-w-md mx-auto mb-6">
+        <div className="flex bg-neutral-900 p-1 rounded-xl border border-white/10 shadow-2xl w-full max-w-lg mx-auto mb-6">
           <button
             onClick={() => setClientTab("workouts")}
             className={`flex-1 py-2 text-sm font-medium rounded-lg transition-colors ${clientTab === "workouts" ? "bg-orange-600 text-white shadow-md" : "text-neutral-400 hover:text-white"}`}
           >
-            Treinos
+            Novo Treino
+          </button>
+          <button
+            onClick={() => setClientTab("history")}
+            className={`flex-1 py-2 text-sm font-medium rounded-lg transition-colors ${clientTab === "history" ? "bg-orange-600 text-white shadow-md" : "text-neutral-400 hover:text-white"}`}
+          >
+            Histórico
           </button>
           <button
             onClick={() => setClientTab("assessments")}
@@ -764,6 +1061,8 @@ function PersonalDashboard() {
         
         {clientTab === "workouts" ? (
           <WorkoutBuilder client={selectedClient} onBack={() => setSelectedClient(null)} />
+        ) : clientTab === "history" ? (
+          <WorkoutHistory client={selectedClient} onBack={() => setSelectedClient(null)} />
         ) : (
           <AssessmentView 
             clientId={selectedClient.id} 
@@ -778,14 +1077,21 @@ function PersonalDashboard() {
 
   return (
     <div className="space-y-6">
+      <div className="bg-neutral-900 p-6 rounded-3xl border border-white/10 shadow-2xl text-center mb-8 bg-gradient-to-br from-neutral-900 to-neutral-950">
+        <h3 className="text-neutral-400 text-xs font-medium mb-2 uppercase tracking-widest">Seu Código de Convite</h3>
+        <div className="flex flex-col items-center gap-3">
+          <div className="text-3xl font-black text-orange-500 font-mono tracking-tighter bg-orange-600/10 px-6 py-4 rounded-2xl border border-orange-500/20 shadow-[0_0_20px_rgba(249,115,22,0.1)]">
+            {user?.personalCode}
+          </div>
+          <p className="text-neutral-500 text-[10px] max-w-[180px] leading-relaxed">
+            Compartilhe este código com seus alunos para que eles se conectem ao seu perfil.
+          </p>
+        </div>
+      </div>
+
       <div className="flex justify-between items-center">
         <div>
           <h2 className="text-2xl font-bold text-white">Meus Alunos</h2>
-          {user?.personalCode && (
-            <p className="text-sm text-neutral-400 mt-1">
-              Seu código de convite: <span className="font-mono text-orange-500 font-bold bg-orange-600/10 px-2 py-1 rounded">{user.personalCode}</span>
-            </p>
-          )}
         </div>
         <button
           onClick={() => setShowAdd(!showAdd)}
@@ -947,41 +1253,70 @@ function ClientWorkoutView({ workout, onBack }: { workout: any, onBack: () => vo
                   <div>
                     <h3 className="text-xl font-bold text-white">{ex.name}</h3>
                     <div className="flex items-center gap-3 text-neutral-400 mt-2">
-                      <span className="bg-neutral-800 px-3 py-1 rounded-lg border border-white/10 font-medium">
-                        {ex.sets} séries
-                      </span>
-                      <span className="bg-neutral-800 px-3 py-1 rounded-lg border border-white/10 font-medium">
-                        {ex.reps} reps
-                      </span>
+                      {ex.isCardio ? (
+                        <span className="bg-orange-600/10 text-orange-400 px-3 py-1 rounded-lg border border-orange-500/20 font-medium italic">
+                          {ex.prescription || "Sem prescrição"}
+                        </span>
+                      ) : (
+                        <>
+                          <span className="bg-neutral-800 px-3 py-1 rounded-lg border border-white/10 font-medium">
+                            {ex.sets} séries
+                          </span>
+                          <span className="bg-neutral-800 px-3 py-1 rounded-lg border border-white/10 font-medium">
+                            {ex.reps} reps
+                          </span>
+                        </>
+                      )}
                     </div>
                   </div>
                 </div>
               </div>
 
-              <div className="mt-6 pt-6 border-t border-white/10">
-                {activeTimer === ex.id ? (
-                  <div className="bg-neutral-800 rounded-xl p-6 flex flex-col items-center justify-center border border-orange-600/30">
-                    <div className="text-4xl font-mono font-bold text-orange-500 mb-2">
-                      {formatTime(timeLeft)}
+              {ex.media && (
+                <div className="mt-4 rounded-xl overflow-hidden border border-white/5 bg-black/20">
+                  {ex.media.type === 'image' ? (
+                    <img 
+                      src={ex.media.url} 
+                      alt={ex.name} 
+                      className="w-full max-h-[300px] object-contain mx-auto"
+                      referrerPolicy="no-referrer"
+                    />
+                  ) : (
+                    <video 
+                      src={ex.media.url} 
+                      controls 
+                      className="w-full max-h-[300px] mx-auto"
+                    />
+                  )}
+                </div>
+              )}
+
+              {!ex.isCardio && (
+                <div className="mt-6 pt-6 border-t border-white/10">
+                  {activeTimer === ex.id ? (
+                    <div className="bg-neutral-800 rounded-xl p-6 flex flex-col items-center justify-center border border-orange-600/30">
+                      <div className="text-4xl font-mono font-bold text-orange-500 mb-2">
+                        {formatTime(timeLeft)}
+                      </div>
+                      <p className="text-sm text-neutral-400">Descansando...</p>
+                      <button 
+                        onClick={() => setActiveTimer(null)}
+                        className="mt-4 text-sm text-neutral-500 hover:text-white transition-colors"
+                      >
+                        Cancelar
+                      </button>
                     </div>
-                    <p className="text-sm text-neutral-400">Descansando...</p>
-                    <button 
-                      onClick={() => setActiveTimer(null)}
-                      className="mt-4 text-sm text-neutral-500 hover:text-white transition-colors"
+                  ) : (
+                    <button
+                      onClick={() => startTimer(ex.id, ex.rest)}
+                      className="w-full bg-neutral-800 hover:bg-neutral-700 border border-white/10 text-white font-medium py-4 rounded-xl transition-colors flex items-center justify-center gap-2"
                     >
-                      Cancelar
+                      <Clock className="w-5 h-5 text-orange-500" />
+                      Iniciar Descanso ({ex.rest}s)
                     </button>
-                  </div>
-                ) : (
-                  <button
-                    onClick={() => startTimer(ex.id, ex.rest)}
-                    className="w-full bg-neutral-800 hover:bg-neutral-700 border border-white/10 text-white font-medium py-4 rounded-xl transition-colors flex items-center justify-center gap-2"
-                  >
-                    <Clock className="w-5 h-5 text-orange-500" />
-                    Iniciar Descanso ({ex.rest}s)
-                  </button>
-                )}
-              </div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         ))}
@@ -1602,6 +1937,45 @@ function Dashboard() {
               
               <h4 className="text-lg font-medium text-white mb-6">Atualizar Cadastro</h4>
               <CompleteProfile isEditing={true} />
+
+              <div className="mt-12 pt-8 border-t border-red-500/20">
+                <div className="bg-red-500/5 border border-red-500/20 rounded-2xl p-6">
+                  <div className="flex items-center gap-3 mb-4">
+                    <AlertTriangle className="w-5 h-5 text-red-500" />
+                    <h4 className="text-lg font-medium text-red-500">Zona de Perigo</h4>
+                  </div>
+                  <p className="text-sm text-neutral-400 mb-6">
+                    Ao excluir sua conta, todos os seus dados, treinos e conexões serão removidos permanentemente. Esta ação não pode ser desfeita.
+                  </p>
+                  <button
+                    onClick={async () => {
+                      if (window.confirm("Tem certeza que deseja excluir sua conta permanentemente? Esta ação não pode ser desfeita.")) {
+                        try {
+                          const userAuth = auth.currentUser;
+                          if (userAuth) {
+                            // Delete from Firestore first
+                            await deleteDoc(doc(db, "users", userAuth.uid));
+                            // Delete from Auth
+                            await deleteUser(userAuth);
+                            alert("Sua conta foi excluída com sucesso.");
+                            window.location.href = "/login";
+                          }
+                        } catch (err: any) {
+                          console.error("Delete account error:", err);
+                          if (err.code === "auth/requires-recent-login") {
+                            alert("Para sua segurança, você precisa ter feito login recentemente para excluir sua conta. Por favor, saia e entre novamente antes de tentar excluir.");
+                          } else {
+                            alert("Ocorreu um erro ao excluir sua conta. Tente novamente mais tarde.");
+                          }
+                        }
+                      }
+                    }}
+                    className="w-full bg-red-600/10 hover:bg-red-600 text-red-500 hover:text-white border border-red-500/50 font-bold py-3 rounded-xl transition-all"
+                  >
+                    Excluir Minha Conta
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         )}

@@ -1,4 +1,10 @@
 export const EXERCISES = [
+  // Cardio
+  "Esteira",
+  "Eliptico",
+  "Simulador de Escadas",
+  "Bike",
+
   // Musculação - Peito
   "Supino Reto com Barra",
   "Supino Inclinado com Halteres",
