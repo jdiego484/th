@@ -1,6 +1,7 @@
 import { useState, useEffect, createContext, useContext, ReactNode, FormEvent, ChangeEvent } from "react";
 import { BrowserRouter, Routes, Route, Navigate, useNavigate } from "react-router-dom";
-import { User, LogOut, Users, Dumbbell, Activity, Search, Plus, ArrowLeft, Clock, Play, Check, Trash2, ChevronLeft, ChevronRight, Calendar as CalendarIcon, AlertTriangle, Image as ImageIcon, Video, Upload, X, Copy, Edit2, MessageSquare, CheckCircle2 } from "lucide-react";
+import { User, LogOut, Users, Dumbbell, Activity, Search, Plus, ArrowLeft, Clock, Play, Check, Trash2, ChevronLeft, ChevronRight, Calendar as CalendarIcon, AlertTriangle, Image as ImageIcon, Video, Upload, X, Copy, Edit2, MessageSquare, CheckCircle2, Circle, GripVertical, Send } from "lucide-react";
+import { DragDropContext, Droppable, Draggable, DropResult } from "@hello-pangea/dnd";
 import { auth, db } from "./firebase";
 import { EXERCISES } from "./data/exercises";
 import { AssessmentView } from "./components/AssessmentView";
@@ -23,7 +24,11 @@ import {
   addDoc,
   updateDoc,
   onSnapshot,
-  deleteDoc
+  deleteDoc,
+  orderBy,
+  limit,
+  serverTimestamp,
+  writeBatch
 } from "firebase/firestore";
 
 type UserType = {
@@ -589,11 +594,8 @@ function WorkoutBuilder({ client, onBack, existingWorkout }: { client: any, onBa
   const addExercise = () => {
     if (!currentExercise.trim()) return;
     
-    // Get default media if none uploaded
-    const finalMedia = media || DEFAULT_EXERCISE_MEDIA[currentExercise] || { 
-      url: `https://picsum.photos/seed/${currentExercise}/400/300`, 
-      type: 'image' 
-    };
+    // User requested no default image if none uploaded
+    const finalMedia = media;
 
     const newExercise = {
       id: Math.random().toString(36).substring(2, 9),
@@ -615,6 +617,20 @@ function WorkoutBuilder({ client, onBack, existingWorkout }: { client: any, onBa
 
   const removeExercise = (id: string) => {
     setExercises(exercises.filter(ex => ex.id !== id));
+  };
+
+  const deleteWorkout = async (id: string) => {
+    console.log("Attempting to delete workout:", id);
+    if (!window.confirm("CONFIRMAR EXCLUSÃO: Tem certeza que deseja excluir este treino permanentemente?")) return;
+    
+    try {
+      await deleteDoc(doc(db, "workouts", id));
+      alert("Treino excluído com sucesso!");
+      onBack();
+    } catch (error: any) {
+      console.error("Error deleting workout:", error);
+      alert("Erro ao excluir treino: " + (error.message || "Verifique suas permissões."));
+    }
   };
 
   const saveWorkout = async () => {
@@ -646,6 +662,14 @@ function WorkoutBuilder({ client, onBack, existingWorkout }: { client: any, onBa
     } finally {
       setIsSaving(false);
     }
+  };
+
+  const onDragEnd = (result: DropResult) => {
+    if (!result.destination) return;
+    const items = Array.from(exercises);
+    const [reorderedItem] = items.splice(result.source.index, 1);
+    items.splice(result.destination.index, 0, reorderedItem);
+    setExercises(items);
   };
 
   return (
@@ -888,53 +912,94 @@ function WorkoutBuilder({ client, onBack, existingWorkout }: { client: any, onBa
                   {exercises.length} exercícios
                 </span>
               </div>
-              <div className="divide-y divide-white/10">
-                {exercises.map((ex, index) => (
-                  <div key={ex.id} className="p-4 flex items-center justify-between hover:bg-white/5 transition-colors">
-                    <div className="flex items-center gap-4">
-                      <div className="w-8 h-8 bg-neutral-800 rounded-full flex items-center justify-center text-sm font-bold text-neutral-400 shrink-0 border border-white/10">
-                        {index + 1}
-                      </div>
-                      <div className="w-12 h-12 bg-neutral-800 rounded-lg overflow-hidden border border-white/10 shrink-0">
-                        {ex.media?.type === 'image' ? (
-                          <img src={ex.media.url} alt="" className="w-full h-full object-cover" />
-                        ) : (
-                          <div className="w-full h-full flex items-center justify-center bg-orange-600/10">
-                            <Video className="w-5 h-5 text-orange-500" />
-                          </div>
-                        )}
-                      </div>
-                      <div>
-                        <h4 className="font-medium text-white">{ex.name}</h4>
-                        <div className="flex items-center gap-3 text-sm text-neutral-400 mt-1">
-                          {ex.isCardio ? (
-                            <span className="text-orange-400 italic">{ex.prescription || "Sem prescrição"}</span>
-                          ) : (
-                            <>
-                              <span>{ex.sets} séries</span>
-                              <span className="w-1 h-1 bg-neutral-600 rounded-full"></span>
-                              <span>{ex.reps} reps</span>
-                              <span className="w-1 h-1 bg-neutral-600 rounded-full"></span>
-                              <span className="flex items-center gap-1 text-blue-400"><Clock className="w-3 h-3" /> {ex.rest}s descanso</span>
-                            </>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                    <button 
-                      onClick={() => removeExercise(ex.id)}
-                      className="p-2 text-neutral-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
+              
+              <DragDropContext onDragEnd={onDragEnd}>
+                <Droppable droppableId="exercises">
+                  {(provided) => (
+                    <div 
+                      {...provided.droppableProps} 
+                      ref={provided.innerRef}
+                      className="divide-y divide-white/10"
                     >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-              <div className="p-6 bg-neutral-900 border-t border-white/10">
+                      {exercises.map((ex, index) => {
+                        const DraggableComponent = Draggable as any;
+                        return (
+                          <DraggableComponent key={ex.id} draggableId={ex.id} index={index}>
+                            {(provided: any, snapshot: any) => (
+                              <div 
+                                ref={provided.innerRef}
+                                {...provided.draggableProps}
+                                className={`p-4 flex items-center justify-between transition-colors ${snapshot.isDragging ? 'bg-neutral-800 shadow-2xl z-50' : 'hover:bg-white/5'}`}
+                              >
+                                <div className="flex items-center gap-4">
+                                  <div 
+                                    {...provided.dragHandleProps}
+                                    className="text-neutral-600 hover:text-neutral-400 cursor-grab active:cursor-grabbing p-1"
+                                  >
+                                    <GripVertical className="w-5 h-5" />
+                                  </div>
+                                  <div className="w-8 h-8 bg-neutral-800 rounded-full flex items-center justify-center text-sm font-bold text-neutral-400 shrink-0 border border-white/10">
+                                    {index + 1}
+                                  </div>
+                                  {ex.media && (
+                                    <div className="w-12 h-12 bg-neutral-800 rounded-lg overflow-hidden border border-white/10 shrink-0">
+                                      {ex.media.type === 'image' ? (
+                                        <img src={ex.media.url} alt="" className="w-full h-full object-cover" />
+                                      ) : (
+                                        <div className="w-full h-full flex items-center justify-center bg-orange-600/10">
+                                          <Video className="w-5 h-5 text-orange-500" />
+                                        </div>
+                                      )}
+                                    </div>
+                                  )}
+                                  <div>
+                                    <h4 className="font-medium text-white">{ex.name}</h4>
+                                    <div className="flex items-center gap-3 text-sm text-neutral-400 mt-1">
+                                      {ex.isCardio ? (
+                                        <span className="text-orange-400 italic">{ex.prescription || "Sem prescrição"}</span>
+                                      ) : (
+                                        <>
+                                          <span>{ex.sets} séries</span>
+                                          <span className="w-1 h-1 bg-neutral-600 rounded-full"></span>
+                                          <span>{ex.reps} reps</span>
+                                          <span className="w-1 h-1 bg-neutral-600 rounded-full"></span>
+                                          <span className="flex items-center gap-1 text-blue-400"><Clock className="w-3 h-3" /> {ex.rest}s descanso</span>
+                                        </>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                                <button 
+                                  onClick={() => removeExercise(ex.id)}
+                                  className="p-2 text-neutral-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
+                            )}
+                          </DraggableComponent>
+                        );
+                      })}
+                      {provided.placeholder}
+                    </div>
+                  )}
+                </Droppable>
+              </DragDropContext>
+
+              <div className="p-6 bg-neutral-900 border-t border-white/10 flex flex-col sm:flex-row gap-4">
+                {existingWorkout && (
+                  <button
+                    type="button"
+                    onClick={() => deleteWorkout(existingWorkout.id)}
+                    className="flex-1 bg-red-500/10 hover:bg-red-500/20 text-red-500 font-bold py-4 rounded-xl transition-all flex items-center justify-center gap-2 border border-red-500/20 order-2 sm:order-1"
+                  >
+                    <Trash2 className="w-5 h-5" /> Excluir Treino
+                  </button>
+                )}
                 <button
                   onClick={saveWorkout}
                   disabled={isSaving}
-                  className="w-full bg-orange-600 hover:bg-orange-500 disabled:opacity-50 text-white font-bold py-4 rounded-xl transition-all transform active:scale-95 flex items-center justify-center gap-2 shadow-lg shadow-orange-600/20"
+                  className="flex-[2] bg-orange-600 hover:bg-orange-500 disabled:opacity-50 text-white font-bold py-4 rounded-xl transition-all transform active:scale-95 flex items-center justify-center gap-2 shadow-lg shadow-orange-600/20 order-1 sm:order-2"
                 >
                   {isSaving ? "Salvando..." : <><Check className="w-5 h-5" /> Salvar e Enviar Treino</>}
                 </button>
@@ -979,13 +1044,39 @@ function WorkoutHistory({ client, onBack }: { client: any, onBack: () => void })
   };
 
   const deleteWorkout = async (id: string) => {
-    if (window.confirm("Tem certeza que deseja excluir este treino?")) {
-      try {
-        await deleteDoc(doc(db, "workouts", id));
-        setWorkouts(workouts.filter(w => w.id !== id));
-      } catch (error) {
-        console.error("Error deleting workout:", error);
-      }
+    console.log("WorkoutHistory: Deleting workout:", id);
+    if (!window.confirm("CONFIRMAR EXCLUSÃO: Tem certeza que deseja excluir este treino permanentemente?")) {
+      console.log("WorkoutHistory: Deletion cancelled by user");
+      return;
+    }
+    
+    try {
+      console.log("WorkoutHistory: Calling deleteDoc for:", id);
+      await deleteDoc(doc(db, "workouts", id));
+      console.log("WorkoutHistory: deleteDoc successful");
+      setWorkouts(prev => prev.filter(w => w.id !== id));
+      alert("Treino excluído com sucesso!");
+    } catch (error: any) {
+      console.error("WorkoutHistory: Error deleting workout:", error);
+      alert("Erro ao excluir treino: " + (error.message || "Verifique suas permissões."));
+    }
+  };
+
+  const clearAllHistory = async () => {
+    if (workouts.length === 0) return;
+    if (!window.confirm(`ATENÇÃO: Você está prestes a excluir TODOS os ${workouts.length} treinos deste aluno. Esta ação não pode ser desfeita. Deseja continuar?`)) return;
+    
+    setLoading(true);
+    try {
+      const deletePromises = workouts.map(w => deleteDoc(doc(db, "workouts", w.id)));
+      await Promise.all(deletePromises);
+      setWorkouts([]);
+      alert("Todo o histórico foi removido com sucesso!");
+    } catch (error: any) {
+      console.error("Error clearing history:", error);
+      alert("Erro ao limpar histórico: " + (error.message || "Verifique suas permissões."));
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -1006,12 +1097,25 @@ function WorkoutHistory({ client, onBack }: { client: any, onBack: () => void })
     return (
       <div className="space-y-6">
         <div className="flex items-center gap-4">
-          <button onClick={() => setSelectedWorkout(null)} className="p-2 bg-neutral-800 hover:bg-neutral-700 rounded-xl transition-colors">
+          <button 
+            onClick={() => {
+              setSelectedWorkout(null);
+              fetchWorkouts();
+            }} 
+            className="p-2 bg-neutral-800 hover:bg-neutral-700 rounded-xl transition-colors"
+          >
             <ArrowLeft className="w-5 h-5 text-white" />
           </button>
           <h2 className="text-2xl font-bold text-white">Detalhes do Treino</h2>
         </div>
-        <ClientWorkoutView workout={selectedWorkout} onBack={() => setSelectedWorkout(null)} />
+        <ClientWorkoutView 
+          workout={selectedWorkout} 
+          onBack={() => {
+            setSelectedWorkout(null);
+            fetchWorkouts();
+          }} 
+          isPersonal={true} 
+        />
       </div>
     );
   }
@@ -1022,9 +1126,19 @@ function WorkoutHistory({ client, onBack }: { client: any, onBack: () => void })
         <button onClick={onBack} className="p-2 bg-neutral-800 hover:bg-neutral-700 rounded-xl transition-colors">
           <ArrowLeft className="w-5 h-5 text-white" />
         </button>
-        <div>
-          <h2 className="text-2xl font-bold text-white">Histórico de Treinos</h2>
-          <p className="text-sm text-neutral-400">Aluno: <span className="text-orange-500 font-medium">{client.name}</span></p>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <h2 className="text-2xl font-bold text-white">Histórico de Treinos</h2>
+            <p className="text-sm text-neutral-400">Aluno: <span className="text-orange-500 font-medium">{client.name}</span></p>
+          </div>
+          {workouts.length > 0 && (
+            <button 
+              onClick={clearAllHistory}
+              className="flex items-center justify-center gap-2 px-4 py-2 bg-red-500/10 hover:bg-red-500 text-red-500 hover:text-white border border-red-500/20 rounded-xl transition-all text-sm font-medium"
+            >
+              <Trash2 className="w-4 h-4" /> Limpar Todo o Histórico
+            </button>
+          )}
         </div>
       </div>
 
@@ -1064,24 +1178,36 @@ function WorkoutHistory({ client, onBack }: { client: any, onBack: () => void })
                   </p>
                 </div>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 relative z-[100] shrink-0">
                 <button 
-                  onClick={() => setSelectedWorkout(workout)}
-                  className="p-2 text-neutral-400 hover:text-white hover:bg-neutral-800 rounded-lg transition-colors"
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSelectedWorkout(workout);
+                  }}
+                  className="p-2 text-neutral-400 hover:text-white hover:bg-neutral-800 rounded-lg transition-colors cursor-pointer relative z-[101]"
                   title="Ver Detalhes"
                 >
                   <Play className="w-5 h-5" />
                 </button>
                 <button 
-                  onClick={() => setEditingWorkout(workout)}
-                  className="p-2 text-neutral-400 hover:text-orange-500 hover:bg-orange-500/10 rounded-lg transition-colors"
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setEditingWorkout(workout);
+                  }}
+                  className="p-2 text-neutral-400 hover:text-orange-500 hover:bg-orange-500/10 rounded-lg transition-colors cursor-pointer relative z-[101]"
                   title="Editar Treino"
                 >
                   <Edit2 className="w-5 h-5" />
                 </button>
                 <button 
-                  onClick={() => deleteWorkout(workout.id)}
-                  className="p-2 text-neutral-400 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-colors"
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    deleteWorkout(workout.id);
+                  }}
+                  className="p-2 text-neutral-400 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-colors cursor-pointer relative z-[101]"
                   title="Excluir Treino"
                 >
                   <Trash2 className="w-5 h-5" />
@@ -1095,6 +1221,163 @@ function WorkoutHistory({ client, onBack }: { client: any, onBack: () => void })
   );
 }
 
+interface ChatMessage {
+  id: string;
+  text: string;
+  senderId: string;
+  createdAt: any;
+}
+
+function ChatModal({ 
+  roomId, 
+  recipientName, 
+  onClose 
+}: { 
+  roomId: string; 
+  recipientName: string; 
+  onClose: () => void; 
+}) {
+  const { user } = useAuth();
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [newMessage, setNewMessage] = useState("");
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const q = query(
+      collection(db, "chats", roomId, "messages"),
+      orderBy("createdAt", "asc")
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const msgs = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as ChatMessage[];
+      setMessages(msgs);
+      setLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, [roomId]);
+
+  const sendMessage = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!newMessage.trim() || !user) return;
+
+    try {
+      await addDoc(collection(db, "chats", roomId, "messages"), {
+        text: newMessage,
+        senderId: user.id,
+        createdAt: serverTimestamp()
+      });
+      setNewMessage("");
+    } catch (err) {
+      console.error("Erro ao enviar mensagem:", err);
+    }
+  };
+
+  const endChat = async () => {
+    if (!window.confirm("Ao fechar ou encerrar, todo o histórico deste chat será APAGADO permanentemente. Deseja continuar?")) return;
+    
+    try {
+      const q = query(collection(db, "chats", roomId, "messages"));
+      const snapshot = await getDocs(q);
+      const batch = writeBatch(db);
+      
+      snapshot.docs.forEach((doc) => {
+        batch.delete(doc.ref);
+      });
+      
+      await batch.commit();
+      onClose();
+    } catch (err) {
+      console.error("Erro ao encerrar chat:", err);
+      onClose();
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+      <div className="bg-neutral-900 w-full max-w-lg h-[600px] rounded-3xl border border-white/10 shadow-2xl flex flex-col overflow-hidden">
+        {/* Header */}
+        <div className="p-4 border-b border-white/10 flex items-center justify-between bg-neutral-950">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 bg-orange-600/20 rounded-full flex items-center justify-center text-orange-500 font-bold">
+              {recipientName.charAt(0).toUpperCase()}
+            </div>
+            <div>
+              <h3 className="text-white font-bold">{recipientName}</h3>
+              <p className="text-[10px] text-emerald-500 flex items-center gap-1">
+                <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse"></span>
+                Chat Temporário Ativo
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <button 
+              onClick={endChat}
+              className="flex items-center gap-2 text-xs bg-red-500/10 text-red-500 px-3 py-1.5 rounded-lg border border-red-500/20 hover:bg-red-500 hover:text-white transition-all font-bold"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              Encerrar e Apagar
+            </button>
+            <button onClick={endChat} className="p-2 text-neutral-400 hover:text-white" title="Fechar e Apagar">
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+        </div>
+
+        {/* Messages */}
+        <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-neutral-900/50">
+          {loading ? (
+            <div className="flex items-center justify-center h-full">
+              <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-orange-500"></div>
+            </div>
+          ) : messages.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-full text-neutral-500 text-center space-y-2">
+              <MessageSquare className="w-12 h-12 opacity-20" />
+              <p className="text-sm">Inicie uma conversa segura.<br/>O histórico será apagado ao encerrar.</p>
+            </div>
+          ) : (
+            messages.map((msg) => (
+              <div 
+                key={msg.id} 
+                className={`flex ${msg.senderId === user?.id ? 'justify-end' : 'justify-start'}`}
+              >
+                <div className={`max-w-[80%] p-3 rounded-2xl text-sm ${
+                  msg.senderId === user?.id 
+                    ? 'bg-orange-600 text-white rounded-tr-none' 
+                    : 'bg-neutral-800 text-neutral-200 rounded-tl-none border border-white/5'
+                }`}>
+                  {msg.text}
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+
+        {/* Input */}
+        <form onSubmit={sendMessage} className="p-4 bg-neutral-950 border-t border-white/10 flex gap-2">
+          <input
+            type="text"
+            value={newMessage}
+            onChange={(e) => setNewMessage(e.target.value)}
+            placeholder="Digite sua mensagem..."
+            className="flex-1 bg-neutral-900 border border-white/5 rounded-xl px-4 py-2 text-white focus:outline-none focus:ring-2 focus:ring-orange-500/50"
+          />
+          <button 
+            type="submit"
+            disabled={!newMessage.trim()}
+            className="bg-orange-600 text-white p-2 rounded-xl hover:bg-orange-500 disabled:opacity-50 transition-all"
+          >
+            <Send className="w-5 h-5" />
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 function PersonalDashboard() {
   const { user } = useAuth();
   const [clients, setClients] = useState<any[]>([]);
@@ -1103,6 +1386,7 @@ function PersonalDashboard() {
   const [sortBy, setSortBy] = useState<"name" | "date">("name");
   const [selectedClient, setSelectedClient] = useState<any>(null);
   const [clientTab, setClientTab] = useState<"workouts" | "history" | "assessments">("workouts");
+  const [chatRoom, setChatRoom] = useState<{ id: string; name: string } | null>(null);
 
   useEffect(() => {
     if (user) {
@@ -1319,9 +1603,21 @@ function PersonalDashboard() {
                       <td className="px-4 py-3 hidden sm:table-cell">{client.email}</td>
                       <td className="px-4 py-3 whitespace-nowrap">{formattedDate}</td>
                       <td className="px-4 py-3 text-right">
-                        <span className="px-2 py-1 bg-blue-500/10 text-blue-400 rounded-md text-xs font-medium border border-blue-500/20 inline-block">
-                          Ativo
-                        </span>
+                        <div className="flex items-center justify-end gap-2">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setChatRoom({ id: `chat_${user?.id}_${client.id}`, name: client.displayName || client.name });
+                            }}
+                            className="p-2 text-orange-500 hover:bg-orange-500/10 rounded-lg transition-colors"
+                            title="Abrir Chat"
+                          >
+                            <MessageSquare className="w-5 h-5" />
+                          </button>
+                          <span className="px-2 py-1 bg-blue-500/10 text-blue-400 rounded-md text-xs font-medium border border-blue-500/20 inline-block">
+                            Ativo
+                          </span>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -1331,21 +1627,49 @@ function PersonalDashboard() {
           </div>
         )}
       </div>
+
+      {chatRoom && (
+        <ChatModal 
+          roomId={chatRoom.id} 
+          recipientName={chatRoom.name} 
+          onClose={() => setChatRoom(null)} 
+        />
+      )}
     </div>
   );
 }
 
-function ClientWorkoutView({ workout, onBack }: { workout: any, onBack: () => void }) {
+function ClientWorkoutView({ workout, onBack, isPersonal: isPersonalProp }: { workout: any, onBack: () => void, isPersonal?: boolean }) {
   const { user } = useAuth();
   const [activeTimer, setActiveTimer] = useState<string | null>(null);
   const [timeLeft, setTimeLeft] = useState(0);
   const [completedExercises, setCompletedExercises] = useState<string[]>(workout.completedExercises || []);
   const [exerciseFeedback, setExerciseFeedback] = useState<Record<string, string>>(workout.exerciseFeedback || {});
+  const [exerciseLoads, setExerciseLoads] = useState<Record<string, string>>(workout.exerciseLoads || {});
   const [overallFeedback, setOverallFeedback] = useState(workout.overallFeedback || "");
   const [isFinishing, setIsFinishing] = useState(false);
 
-  const isPersonal = user?.role === "personal";
+  const isPersonal = isPersonalProp !== undefined ? isPersonalProp : user?.role === "personal";
   const isCompleted = workout.status === "completed";
+
+  const deleteWorkout = async () => {
+    console.log("ClientWorkoutView: Deleting workout:", workout.id);
+    if (!window.confirm("CONFIRMAR EXCLUSÃO: Tem certeza que deseja excluir este treino permanentemente?")) {
+      console.log("ClientWorkoutView: Deletion cancelled by user");
+      return;
+    }
+    
+    try {
+      console.log("ClientWorkoutView: Calling deleteDoc for:", workout.id);
+      await deleteDoc(doc(db, "workouts", workout.id));
+      console.log("ClientWorkoutView: deleteDoc successful");
+      alert("Treino excluído com sucesso!");
+      onBack();
+    } catch (error: any) {
+      console.error("ClientWorkoutView: Error deleting workout:", error);
+      alert("Erro ao excluir treino: " + (error.message || "Verifique suas permissões."));
+    }
+  };
 
   useEffect(() => {
     let interval: NodeJS.Timeout;
@@ -1388,27 +1712,42 @@ function ClientWorkoutView({ workout, onBack }: { workout: any, onBack: () => vo
   };
 
   const finishWorkout = async () => {
-    if (isPersonal || isCompleted) return;
+    console.log("ClientWorkoutView: finishWorkout called", { 
+      workoutId: workout.id, 
+      isPersonal, 
+      isCompleted,
+      completedExercisesCount: completedExercises.length 
+    });
+
+    if (isPersonal || isCompleted) {
+      console.log("ClientWorkoutView: finishWorkout early return", { isPersonal, isCompleted });
+      return;
+    }
+
     if (completedExercises.length === 0) {
       if (!window.confirm("Você não marcou nenhum exercício como concluído. Deseja finalizar assim mesmo?")) {
+        console.log("ClientWorkoutView: finishWorkout cancelled by user (no exercises completed)");
         return;
       }
     }
 
     setIsFinishing(true);
     try {
+      console.log("ClientWorkoutView: Updating workout doc...");
       await updateDoc(doc(db, "workouts", workout.id), {
         status: "completed",
         completedExercises,
         exerciseFeedback,
+        exerciseLoads,
         overallFeedback,
         completedAt: new Date().toISOString()
       });
+      console.log("ClientWorkoutView: Workout update successful");
       alert("Treino finalizado com sucesso! Bom trabalho!");
       onBack();
-    } catch (error) {
-      console.error("Error finishing workout:", error);
-      alert("Erro ao finalizar treino.");
+    } catch (error: any) {
+      console.error("ClientWorkoutView: Error finishing workout:", error);
+      alert("Erro ao finalizar treino: " + (error.message || "Erro desconhecido"));
     } finally {
       setIsFinishing(false);
     }
@@ -1430,12 +1769,23 @@ function ClientWorkoutView({ workout, onBack }: { workout: any, onBack: () => vo
             </p>
           </div>
         </div>
-        {isCompleted && (
-          <div className="bg-emerald-500/10 text-emerald-400 px-4 py-2 rounded-full border border-emerald-500/20 flex items-center gap-2 font-medium">
-            <CheckCircle2 className="w-5 h-5" />
-            Concluído
-          </div>
-        )}
+        <div className="flex items-center gap-4">
+          {isCompleted && (
+            <div className="bg-emerald-500/10 text-emerald-400 px-4 py-2 rounded-full border border-emerald-500/20 flex items-center gap-2 font-medium">
+              <CheckCircle2 className="w-5 h-5" />
+              Concluído
+            </div>
+          )}
+          {isPersonal && (
+            <button 
+              onClick={deleteWorkout}
+              className="p-2 text-red-500 hover:bg-red-500/10 rounded-xl transition-colors"
+              title="Excluir Treino"
+            >
+              <Trash2 className="w-6 h-6" />
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="grid gap-6">
@@ -1448,14 +1798,14 @@ function ClientWorkoutView({ workout, onBack }: { workout: any, onBack: () => vo
             >
               <div className="p-6">
                 <div className="flex items-start justify-between gap-4">
-                  <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-4 flex-1">
                     <button 
                       onClick={() => toggleExerciseCompletion(ex.id)}
                       disabled={isPersonal || isCompleted}
-                      className={`w-10 h-10 rounded-full flex items-center justify-center text-lg font-bold transition-all shrink-0 ${
+                      className={`w-12 h-12 rounded-2xl flex items-center justify-center text-xl font-black transition-all shrink-0 ${
                         isExCompleted 
                           ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/20' 
-                          : 'bg-neutral-800 text-neutral-400 border border-white/10 hover:border-orange-500/50'
+                          : 'bg-orange-600 text-white shadow-lg shadow-orange-600/20 border border-orange-500/50'
                       }`}
                     >
                       {isExCompleted ? <Check className="w-6 h-6" /> : index + 1}
@@ -1464,24 +1814,61 @@ function ClientWorkoutView({ workout, onBack }: { workout: any, onBack: () => vo
                       <h3 className={`text-xl font-bold transition-colors ${isExCompleted ? 'text-emerald-400' : 'text-white'}`}>
                         {ex.name}
                       </h3>
-                      <div className="flex items-center gap-3 text-neutral-400 mt-2">
+                      <div className="flex flex-wrap items-center gap-2 mt-3">
                         {ex.isCardio ? (
-                          <span className="bg-orange-600/10 text-orange-400 px-3 py-1 rounded-lg border border-orange-500/20 font-medium italic">
+                          <span className="bg-orange-600/10 text-orange-400 px-3 py-1 rounded-lg border border-orange-500/20 font-medium italic text-sm">
                             {ex.prescription || "Sem prescrição"}
                           </span>
                         ) : (
                           <>
-                            <span className="bg-neutral-800 px-3 py-1 rounded-lg border border-white/10 font-medium">
-                              {ex.sets} séries
-                            </span>
-                            <span className="bg-neutral-800 px-3 py-1 rounded-lg border border-white/10 font-medium">
-                              {ex.reps} reps
-                            </span>
+                            <div className="flex items-center bg-indigo-500/10 text-indigo-400 px-3 py-1 rounded-lg border border-indigo-500/20">
+                              <span className="text-[10px] uppercase font-bold mr-1.5 opacity-70">Séries:</span>
+                              <span className="font-bold">{ex.sets}</span>
+                            </div>
+                            <div className="flex items-center bg-emerald-500/10 text-emerald-400 px-3 py-1 rounded-lg border border-emerald-500/20">
+                              <span className="text-[10px] uppercase font-bold mr-1.5 opacity-70">Reps:</span>
+                              <span className="font-bold">{ex.reps}</span>
+                            </div>
+                            <div className="flex items-center bg-amber-500/10 text-amber-400 px-3 py-1 rounded-lg border border-amber-500/20">
+                              <span className="text-[10px] uppercase font-bold mr-1.5 opacity-70">Carga:</span>
+                              {isCompleted || isPersonal ? (
+                                <span className="font-bold">{exerciseLoads[ex.id] || "--"}</span>
+                              ) : (
+                                <input
+                                  type="text"
+                                  value={exerciseLoads[ex.id] || ""}
+                                  onChange={(e) => setExerciseLoads(prev => ({ ...prev, [ex.id]: e.target.value }))}
+                                  placeholder="0"
+                                  className="w-10 bg-transparent border-none text-amber-400 font-bold text-center p-0 focus:outline-none focus:ring-0"
+                                />
+                              )}
+                              <span className="text-[10px] ml-1 opacity-70">kg</span>
+                            </div>
                           </>
                         )}
                       </div>
                     </div>
                   </div>
+
+                  {!isCompleted && (
+                    <button
+                      onClick={() => toggleExerciseCompletion(ex.id)}
+                      disabled={isPersonal}
+                      className={`px-4 py-2 rounded-xl font-bold transition-all flex items-center gap-2 shrink-0 self-start mt-1 ${
+                        isExCompleted 
+                          ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 shadow-lg shadow-emerald-500/10' 
+                          : isPersonal 
+                            ? 'bg-neutral-800/50 text-neutral-500 border border-white/5 cursor-not-allowed'
+                            : 'bg-neutral-800 text-neutral-400 border border-white/5 hover:bg-neutral-700 hover:text-white'
+                      }`}
+                    >
+                      {isExCompleted ? (
+                        <><CheckCircle2 className="w-5 h-5" /> Concluído</>
+                      ) : (
+                        <><Circle className="w-5 h-5" /> Concluir</>
+                      )}
+                    </button>
+                  )}
                 </div>
 
                 {ex.media && (
@@ -1595,6 +1982,7 @@ function ClientDashboard() {
   const [personals, setPersonals] = useState<any[]>([]);
   const [workouts, setWorkouts] = useState<any[]>([]);
   const [selectedWorkout, setSelectedWorkout] = useState<any>(null);
+  const [chatRoom, setChatRoom] = useState<{ id: string; name: string } | null>(null);
 
   useEffect(() => {
     if (user) {
@@ -1629,7 +2017,16 @@ function ClientDashboard() {
   };
 
   if (selectedWorkout) {
-    return <ClientWorkoutView workout={selectedWorkout} onBack={() => setSelectedWorkout(null)} />;
+    return (
+      <ClientWorkoutView 
+        workout={selectedWorkout} 
+        onBack={() => {
+          setSelectedWorkout(null);
+          fetchWorkouts();
+        }} 
+        isPersonal={false} 
+      />
+    );
   }
 
   return (
@@ -1659,7 +2056,14 @@ function ClientDashboard() {
                   <p className="text-sm text-neutral-400">{personal.email}</p>
                 </div>
               </div>
-              <div className="flex gap-2">
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setChatRoom({ id: `chat_${personal.id}_${user?.id}`, name: personal.displayName || personal.name })}
+                  className="p-2 text-orange-500 hover:bg-orange-500/10 rounded-lg transition-colors flex items-center gap-2"
+                >
+                  <MessageSquare className="w-5 h-5" />
+                  <span className="text-xs font-bold hidden sm:inline">Chat</span>
+                </button>
                 <span className="px-3 py-1 bg-blue-500/10 text-blue-400 rounded-full text-xs font-medium border border-blue-500/20">
                   Conectado
                 </span>
@@ -1668,6 +2072,14 @@ function ClientDashboard() {
           ))
         )}
       </div>
+
+      {chatRoom && (
+        <ChatModal 
+          roomId={chatRoom.id} 
+          recipientName={chatRoom.name} 
+          onClose={() => setChatRoom(null)} 
+        />
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-8">
         <div className="bg-neutral-900 p-6 rounded-2xl border border-white/10 shadow-2xl">
