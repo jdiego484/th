@@ -14,12 +14,8 @@
   }
 
   body {
-    @apply bg-neutral-50 text-neutral-900 transition-colors duration-300;
+    @apply bg-neutral-950 text-neutral-200 transition-colors duration-300;
     -webkit-tap-highlight-color: transparent;
-  }
-
-  .dark body {
-    @apply bg-neutral-950 text-neutral-200;
   }
 }
 
@@ -38,9 +34,9 @@
 }
 
 ::-webkit-scrollbar-track {
-  @apply bg-neutral-100 dark:bg-neutral-900;
+  @apply bg-neutral-900;
 }
 
 ::-webkit-scrollbar-thumb {
-  @apply bg-neutral-300 dark:bg-neutral-800 rounded-full hover:bg-neutral-400 dark:hover:bg-neutral-700 transition-colors;
+  @apply bg-neutral-800 rounded-full hover:bg-neutral-700 transition-colors;
 }

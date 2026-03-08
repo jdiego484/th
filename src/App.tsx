@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, createContext, useContext, ReactNode, FormEvent, ChangeEvent } from "react";
 import { BrowserRouter, Routes, Route, Navigate, useNavigate } from "react-router-dom";
-import { User, LogOut, Users, Dumbbell, Activity, Search, Plus, ArrowLeft, Clock, Play, Check, Trash2, ChevronLeft, ChevronRight, Calendar as CalendarIcon, AlertTriangle, Image as ImageIcon, Video, Upload, X, Copy, Edit2, MessageSquare, CheckCircle2, Circle, GripVertical, Send, CreditCard, FileText, Sun, Moon } from "lucide-react";
+import { User, LogOut, Users, Dumbbell, Activity, Search, Plus, ArrowLeft, Clock, Play, Check, Trash2, ChevronLeft, ChevronRight, Calendar as CalendarIcon, AlertTriangle, Image as ImageIcon, Video, Upload, X, Copy, Edit2, MessageSquare, CheckCircle2, Circle, GripVertical, Send, CreditCard, FileText } from "lucide-react";
 import { DragDropContext, Droppable, Draggable, DropResult } from "@hello-pangea/dnd";
 import { auth, db } from "./firebase";
 import { EXERCISES } from "./data/exercises";
@@ -54,45 +54,6 @@ const AuthContext = createContext<{
   logout: () => {},
   updateUser: () => {},
 });
-
-const ThemeContext = createContext<{
-  theme: "light" | "dark";
-  toggleTheme: () => void;
-}>({
-  theme: "dark",
-  toggleTheme: () => {},
-});
-
-function ThemeProvider({ children }: { children: ReactNode }) {
-  const [theme, setTheme] = useState<"light" | "dark">(() => {
-    const saved = localStorage.getItem("theme");
-    return (saved as "light" | "dark") || "dark";
-  });
-
-  useEffect(() => {
-    const root = window.document.documentElement;
-    if (theme === "dark") {
-      root.classList.add("dark");
-    } else {
-      root.classList.remove("dark");
-    }
-    localStorage.setItem("theme", theme);
-  }, [theme]);
-
-  const toggleTheme = () => {
-    setTheme((prev) => (prev === "dark" ? "light" : "dark"));
-  };
-
-  return (
-    <ThemeContext.Provider value={{ theme, toggleTheme }}>
-      {children}
-    </ThemeContext.Provider>
-  );
-}
-
-function useTheme() {
-  return useContext(ThemeContext);
-}
 
 function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<UserType | null>(null);
@@ -181,7 +142,6 @@ function Login() {
   const [success, setSuccess] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const { user, loading } = useAuth();
-  const { theme, toggleTheme } = useTheme();
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -290,31 +250,22 @@ function Login() {
   };
 
   if (loading) {
-    return <div className="min-h-screen bg-neutral-50 dark:bg-neutral-950 flex items-center justify-center text-neutral-900 dark:text-white">Carregando...</div>;
+    return <div className="min-h-screen bg-neutral-950 flex items-center justify-center text-white">Carregando...</div>;
   }
 
   return (
-    <div className="min-h-screen bg-neutral-50 dark:bg-neutral-950 flex flex-col items-center justify-center p-4 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
-      <div className="absolute top-4 right-4">
-        <button
-          onClick={toggleTheme}
-          className="p-2 text-neutral-500 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-white/5 rounded-full transition-colors"
-          title={theme === "dark" ? "Modo Claro" : "Modo Escuro"}
-        >
-          {theme === "dark" ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
-        </button>
-      </div>
-      <div className="bg-white dark:bg-neutral-900 p-8 rounded-2xl shadow-2xl w-full max-w-md border border-neutral-200 dark:border-white/10">
+    <div className="min-h-screen bg-neutral-950 flex flex-col items-center justify-center p-4 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
+      <div className="bg-neutral-900 p-8 rounded-2xl shadow-2xl w-full max-w-md border border-white/10">
         <div className="text-center mb-8">
           <div className="flex justify-center mb-4">
             <div className="bg-blue-500/10 p-2 rounded-2xl">
               <img src="https://i.imgur.com/fxOHjtK.png" alt="Track & Health Logo" className="w-16 h-16 object-contain" referrerPolicy="no-referrer" />
             </div>
           </div>
-          <h1 className="text-2xl font-bold text-neutral-900 dark:text-white tracking-tight">Track & Health</h1>
-          <p className="text-sm text-neutral-500 dark:text-neutral-400 mt-1 italic">Monitoramento em Saúde</p>
+          <h1 className="text-2xl font-bold text-white tracking-tight">Track & Health</h1>
+          <p className="text-sm text-neutral-400 mt-1 italic">Monitoramento em Saúde</p>
         </div>
-        <h2 className="text-xl font-bold text-neutral-900 dark:text-white text-center mb-6">
+        <h2 className="text-xl font-bold text-white text-center mb-6">
           {isForgotPassword ? "Recuperar Senha" : (isLogin ? "Bem-vindo de volta" : "Criar Conta")}
         </h2>
         
@@ -333,7 +284,7 @@ function Login() {
         <form onSubmit={isForgotPassword ? handleForgotPassword : handleSubmit} className="space-y-4">
           {!isLogin && !isForgotPassword && (
             <div>
-              <label className="block text-sm font-medium text-neutral-500 dark:text-neutral-400 mb-1">Nome Completo</label>
+              <label className="block text-sm font-medium text-neutral-400 mb-1">Nome Completo</label>
               <input
                 type="text"
                 value={name}
@@ -732,21 +683,21 @@ function WorkoutBuilder({ client, onBack, existingWorkout }: { client: any, onBa
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-4">
-        <button onClick={onBack} className="p-2 bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-700 rounded-xl transition-colors">
-          <ArrowLeft className="w-5 h-5 text-neutral-900 dark:text-white" />
+        <button onClick={onBack} className="p-2 bg-neutral-800 hover:bg-neutral-700 rounded-xl transition-colors">
+          <ArrowLeft className="w-5 h-5 text-white" />
         </button>
         <div>
-          <h2 className="text-2xl font-bold text-neutral-900 dark:text-white">
+          <h2 className="text-2xl font-bold text-white">
             {existingWorkout ? "Editar Treino" : "Montar Treino"}
           </h2>
-          <p className="text-sm text-neutral-500 dark:text-neutral-400">Aluno: <span className="text-orange-600 dark:text-orange-500 font-medium">{client.name}</span></p>
+          <p className="text-sm text-neutral-400">Aluno: <span className="text-orange-500 font-medium">{client.name}</span></p>
         </div>
         <div className="ml-auto">
           <button 
             onClick={() => setShowCopyModal(true)}
-            className="flex items-center gap-2 bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-900 dark:text-white px-4 py-2 rounded-xl border border-neutral-200 dark:border-white/10 transition-colors text-sm font-medium"
+            className="flex items-center gap-2 bg-neutral-800 hover:bg-neutral-700 text-white px-4 py-2 rounded-xl border border-white/10 transition-colors text-sm font-medium"
           >
-            <Copy className="w-4 h-4 text-orange-600 dark:text-orange-500" />
+            <Copy className="w-4 h-4 text-orange-500" />
             Copiar de treino anterior
           </button>
         </div>
@@ -754,17 +705,17 @@ function WorkoutBuilder({ client, onBack, existingWorkout }: { client: any, onBa
 
       {showCopyModal && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-neutral-900 w-full max-w-lg rounded-3xl border border-neutral-200 dark:border-white/10 shadow-2xl overflow-hidden max-h-[80vh] flex flex-col">
-            <div className="p-6 border-b border-neutral-100 dark:border-white/10 flex justify-between items-center">
-              <h3 className="text-xl font-bold text-neutral-900 dark:text-white">Selecionar Treino Anterior</h3>
-              <button onClick={() => setShowCopyModal(false)} className="p-2 hover:bg-neutral-100 dark:hover:bg-white/5 rounded-full transition-colors">
-                <X className="w-6 h-6 text-neutral-500 dark:text-neutral-400" />
+          <div className="bg-neutral-900 w-full max-w-lg rounded-3xl border border-white/10 shadow-2xl overflow-hidden max-h-[80vh] flex flex-col">
+            <div className="p-6 border-b border-white/10 flex justify-between items-center">
+              <h3 className="text-xl font-bold text-white">Selecionar Treino Anterior</h3>
+              <button onClick={() => setShowCopyModal(false)} className="p-2 hover:bg-white/5 rounded-full transition-colors">
+                <X className="w-6 h-6 text-neutral-400" />
               </button>
             </div>
             <div className="p-4 overflow-y-auto flex-1 space-y-3">
               {pastWorkouts.length === 0 ? (
                 <div className="text-center py-12">
-                  <Activity className="w-12 h-12 text-neutral-300 dark:text-neutral-700 mx-auto mb-4" />
+                  <Activity className="w-12 h-12 text-neutral-700 mx-auto mb-4" />
                   <p className="text-neutral-500">Nenhum treino anterior encontrado para este aluno.</p>
                 </div>
               ) : (
@@ -772,18 +723,18 @@ function WorkoutBuilder({ client, onBack, existingWorkout }: { client: any, onBa
                   <button
                     key={workout.id}
                     onClick={() => copyWorkout(workout)}
-                    className="w-full text-left bg-neutral-50 dark:bg-neutral-800 hover:bg-neutral-100 dark:hover:bg-neutral-700 p-4 rounded-2xl border border-neutral-200 dark:border-white/5 hover:border-orange-500/50 transition-all group"
+                    className="w-full text-left bg-neutral-800 hover:bg-neutral-700 p-4 rounded-2xl border border-white/5 hover:border-orange-500/50 transition-all group"
                   >
                     <div className="flex justify-between items-center">
                       <div>
-                        <p className="text-neutral-900 dark:text-white font-medium">Treino de {new Date(workout.date).toLocaleDateString('pt-BR')}</p>
-                        <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-1">{workout.exercises.length} exercícios</p>
+                        <p className="text-white font-medium">Treino de {new Date(workout.date).toLocaleDateString('pt-BR')}</p>
+                        <p className="text-xs text-neutral-400 mt-1">{workout.exercises.length} exercícios</p>
                       </div>
-                      <ChevronRight className="w-5 h-5 text-neutral-400 dark:text-neutral-600 group-hover:text-orange-600 dark:group-hover:text-orange-500 transition-colors" />
+                      <ChevronRight className="w-5 h-5 text-neutral-600 group-hover:text-orange-500 transition-colors" />
                     </div>
                     <div className="mt-3 flex flex-wrap gap-2">
                       {workout.exercises.slice(0, 3).map((ex: any, i: number) => (
-                        <span key={i} className="text-[10px] bg-white dark:bg-neutral-900 text-neutral-500 dark:text-neutral-400 px-2 py-1 rounded-md border border-neutral-200 dark:border-white/5">
+                        <span key={i} className="text-[10px] bg-neutral-900 text-neutral-400 px-2 py-1 rounded-md border border-white/5">
                           {ex.name}
                         </span>
                       ))}
@@ -795,10 +746,10 @@ function WorkoutBuilder({ client, onBack, existingWorkout }: { client: any, onBa
                 ))
               )}
             </div>
-            <div className="p-6 border-t border-neutral-100 dark:border-white/10 bg-neutral-50 dark:bg-neutral-900/50">
+            <div className="p-6 border-t border-white/10 bg-neutral-900/50">
               <button
                 onClick={() => setShowCopyModal(false)}
-                className="w-full py-3 bg-neutral-200 dark:bg-neutral-800 hover:bg-neutral-300 dark:hover:bg-neutral-700 text-neutral-900 dark:text-white rounded-xl font-medium transition-colors"
+                className="w-full py-3 bg-neutral-800 hover:bg-neutral-700 text-white rounded-xl font-medium transition-colors"
               >
                 Cancelar
               </button>
@@ -813,16 +764,16 @@ function WorkoutBuilder({ client, onBack, existingWorkout }: { client: any, onBa
         </div>
 
         <div className="lg:col-span-2 space-y-6">
-          <div className="bg-white dark:bg-neutral-900 p-6 rounded-2xl border border-neutral-200 dark:border-white/10 shadow-2xl">
+          <div className="bg-neutral-900 p-6 rounded-2xl border border-white/10 shadow-2xl">
             <div className="flex justify-between items-center mb-4">
-              <h3 className="text-lg font-medium text-neutral-900 dark:text-white">Adicionar Exercício</h3>
-              <span className="text-sm text-emerald-600 dark:text-emerald-400 font-medium bg-emerald-500/10 px-3 py-1 rounded-full">
+              <h3 className="text-lg font-medium text-white">Adicionar Exercício</h3>
+              <span className="text-sm text-emerald-400 font-medium bg-emerald-500/10 px-3 py-1 rounded-full">
                 {new Date(workoutDate + "T12:00:00Z").toLocaleDateString('pt-BR')}
               </span>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
               <div className={isCardio ? "md:col-span-5 relative" : "md:col-span-4 relative"}>
-                <label className="block text-sm font-medium text-neutral-500 dark:text-neutral-400 mb-1">Exercício</label>
+                <label className="block text-sm font-medium text-neutral-400 mb-1">Exercício</label>
                 <input
                   type="text"
                   value={currentExercise}
@@ -842,16 +793,16 @@ function WorkoutBuilder({ client, onBack, existingWorkout }: { client: any, onBa
                       }
                     }
                   }}
-                  className="w-full bg-neutral-50 dark:bg-neutral-800 border border-neutral-200 dark:border-white/10 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-orange-600"
+                  className="w-full bg-neutral-800 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-orange-600"
                   placeholder="Ex: Supino Reto"
                 />
                 {showExerciseList && currentExercise && (
-                  <div className="absolute z-10 w-full mt-1 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-white/10 rounded-xl shadow-2xl max-h-60 overflow-y-auto">
+                  <div className="absolute z-10 w-full mt-1 bg-neutral-800 border border-white/10 rounded-xl shadow-2xl max-h-60 overflow-y-auto">
                     {filteredExercises.length > 0 ? (
                       filteredExercises.map((ex, i) => (
                         <div 
                           key={i} 
-                          className="px-4 py-2 hover:bg-orange-600/20 cursor-pointer text-neutral-900 dark:text-white text-sm"
+                          className="px-4 py-2 hover:bg-orange-600/20 cursor-pointer text-white text-sm"
                           onMouseDown={() => {
                             setCurrentExercise(ex);
                             setShowExerciseList(false);
@@ -871,49 +822,49 @@ function WorkoutBuilder({ client, onBack, existingWorkout }: { client: any, onBa
 
               {isCardio ? (
                 <div className="md:col-span-5">
-                  <label className="block text-sm font-medium text-neutral-500 dark:text-neutral-400 mb-1">Prescrição</label>
+                  <label className="block text-sm font-medium text-neutral-400 mb-1">Prescrição</label>
                   <input
                     type="text"
                     value={prescription}
                     onChange={(e) => setPrescription(e.target.value)}
-                    className="w-full bg-neutral-50 dark:bg-neutral-800 border border-neutral-200 dark:border-white/10 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-orange-600"
+                    className="w-full bg-neutral-800 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-orange-600"
                     placeholder="Ex: 20 min, moderado"
                   />
                 </div>
               ) : (
                 <>
                   <div className="md:col-span-2">
-                    <label className="block text-sm font-medium text-neutral-500 dark:text-neutral-400 mb-1">Séries</label>
+                    <label className="block text-sm font-medium text-neutral-400 mb-1">Séries</label>
                     <input
                       type="text"
                       value={sets}
                       onChange={(e) => setSets(e.target.value)}
-                      className="w-full bg-neutral-50 dark:bg-neutral-800 border border-neutral-200 dark:border-white/10 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-orange-600 text-center"
+                      className="w-full bg-neutral-800 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-orange-600 text-center"
                     />
                   </div>
                   <div className="md:col-span-2">
-                    <label className="block text-sm font-medium text-neutral-500 dark:text-neutral-400 mb-1">Reps</label>
+                    <label className="block text-sm font-medium text-neutral-400 mb-1">Reps</label>
                     <input
                       type="text"
                       value={reps}
                       onChange={(e) => setReps(e.target.value)}
-                      className="w-full bg-neutral-50 dark:bg-neutral-800 border border-neutral-200 dark:border-white/10 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-orange-600 text-center"
+                      className="w-full bg-neutral-800 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-orange-600 text-center"
                     />
                   </div>
                   <div className="md:col-span-2">
-                    <label className="block text-sm font-medium text-neutral-500 dark:text-neutral-400 mb-1">Desc. (s)</label>
+                    <label className="block text-sm font-medium text-neutral-400 mb-1">Desc. (s)</label>
                     <input
                       type="number"
                       value={rest}
                       onChange={(e) => setRest(e.target.value)}
-                      className="w-full bg-neutral-50 dark:bg-neutral-800 border border-neutral-200 dark:border-white/10 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-orange-600 text-center"
+                      className="w-full bg-neutral-800 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-orange-600 text-center"
                     />
                   </div>
                 </>
               )}
 
               <div className="md:col-span-1">
-                <label className="block text-sm font-medium text-neutral-500 dark:text-neutral-400 mb-1 text-center">Mídia</label>
+                <label className="block text-sm font-medium text-neutral-400 mb-1 text-center">Mídia</label>
                 <div className="relative group">
                   <input
                     type="file"
@@ -924,7 +875,7 @@ function WorkoutBuilder({ client, onBack, existingWorkout }: { client: any, onBa
                   />
                   <label
                     htmlFor="media-upload"
-                    className={`w-full h-[50px] bg-neutral-50 dark:bg-neutral-800 border-2 border-dashed ${media ? 'border-orange-600' : 'border-neutral-200 dark:border-white/10'} rounded-xl flex items-center justify-center cursor-pointer hover:bg-neutral-100 dark:hover:bg-neutral-700 transition-all group overflow-hidden`}
+                    className={`w-full h-[50px] bg-neutral-800 border-2 border-dashed ${media ? 'border-orange-600' : 'border-white/10'} rounded-xl flex items-center justify-center cursor-pointer hover:bg-neutral-700 transition-all group overflow-hidden`}
                   >
                     {isUploading ? (
                       <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-orange-600"></div>
@@ -932,10 +883,10 @@ function WorkoutBuilder({ client, onBack, existingWorkout }: { client: any, onBa
                       media.type === 'image' ? (
                         <img src={media.url} alt="Preview" className="w-full h-full object-cover" />
                       ) : (
-                        <Video className="w-5 h-5 text-orange-600 dark:text-orange-500" />
+                        <Video className="w-5 h-5 text-orange-500" />
                       )
                     ) : (
-                      <Upload className="w-5 h-5 text-neutral-400 dark:text-neutral-500 group-hover:text-orange-600 dark:group-hover:text-orange-500" />
+                      <Upload className="w-5 h-5 text-neutral-500 group-hover:text-orange-500" />
                     )}
                   </label>
                   {media && (
@@ -950,7 +901,7 @@ function WorkoutBuilder({ client, onBack, existingWorkout }: { client: any, onBa
               </div>
 
               {error && (
-                <div className="md:col-span-7 bg-red-500/10 border border-red-500/20 text-red-600 dark:text-red-500 text-xs p-3 rounded-xl flex items-center gap-2 animate-pulse">
+                <div className="md:col-span-7 bg-red-500/10 border border-red-500/20 text-red-500 text-xs p-3 rounded-xl flex items-center gap-2 animate-pulse">
                   <AlertTriangle className="w-4 h-4 shrink-0" />
                   {error}
                 </div>
@@ -969,10 +920,10 @@ function WorkoutBuilder({ client, onBack, existingWorkout }: { client: any, onBa
           </div>
 
           {exercises.length > 0 && (
-            <div className="bg-white dark:bg-neutral-900 rounded-2xl border border-neutral-200 dark:border-white/10 shadow-2xl overflow-hidden">
-              <div className="p-6 border-b border-neutral-100 dark:border-white/10 flex justify-between items-center">
-                <h3 className="text-lg font-medium text-neutral-900 dark:text-white">Exercícios do Treino</h3>
-                <span className="bg-neutral-50 dark:bg-neutral-800 text-emerald-600 dark:text-emerald-400 px-3 py-1 rounded-full text-sm font-medium border border-neutral-200 dark:border-white/10">
+            <div className="bg-neutral-900 rounded-2xl border border-white/10 shadow-2xl overflow-hidden">
+              <div className="p-6 border-b border-white/10 flex justify-between items-center">
+                <h3 className="text-lg font-medium text-white">Exercícios do Treino</h3>
+                <span className="bg-neutral-800 text-emerald-400 px-3 py-1 rounded-full text-sm font-medium border border-white/10">
                   {exercises.length} exercícios
                 </span>
               </div>
@@ -993,41 +944,41 @@ function WorkoutBuilder({ client, onBack, existingWorkout }: { client: any, onBa
                               <div 
                                 ref={provided.innerRef}
                                 {...provided.draggableProps}
-                                className={`p-4 flex items-center justify-between transition-colors ${snapshot.isDragging ? 'bg-neutral-50 dark:bg-neutral-800 shadow-2xl z-50' : 'hover:bg-neutral-50 dark:hover:bg-white/5'}`}
+                                className={`p-4 flex items-center justify-between transition-colors ${snapshot.isDragging ? 'bg-neutral-800 shadow-2xl z-50' : 'hover:bg-white/5'}`}
                               >
                                 <div className="flex items-center gap-3 sm:gap-4 min-w-0 flex-1">
                                   <div 
                                     {...provided.dragHandleProps}
-                                    className="text-neutral-400 dark:text-neutral-600 hover:text-neutral-600 dark:hover:text-neutral-400 cursor-grab active:cursor-grabbing p-1 shrink-0"
+                                    className="text-neutral-600 hover:text-neutral-400 cursor-grab active:cursor-grabbing p-1 shrink-0"
                                   >
                                     <GripVertical className="w-5 h-5" />
                                   </div>
-                                  <div className="w-8 h-8 bg-neutral-100 dark:bg-neutral-800 rounded-full flex items-center justify-center text-sm font-bold text-neutral-500 dark:text-neutral-400 shrink-0 border border-neutral-200 dark:border-white/10">
+                                  <div className="w-8 h-8 bg-neutral-800 rounded-full flex items-center justify-center text-sm font-bold text-neutral-400 shrink-0 border border-white/10">
                                     {index + 1}
                                   </div>
                                   {ex.media && (
-                                    <div className="w-12 h-12 bg-neutral-100 dark:bg-neutral-800 rounded-lg overflow-hidden border border-neutral-200 dark:border-white/10 shrink-0">
+                                    <div className="w-12 h-12 bg-neutral-800 rounded-lg overflow-hidden border border-white/10 shrink-0">
                                       {ex.media.type === 'image' ? (
                                         <img src={ex.media.url} alt="" className="w-full h-full object-cover" />
                                       ) : (
                                         <div className="w-full h-full flex items-center justify-center bg-orange-600/10">
-                                          <Video className="w-5 h-5 text-orange-600 dark:text-orange-500" />
+                                          <Video className="w-5 h-5 text-orange-500" />
                                         </div>
                                       )}
                                     </div>
                                   )}
                                   <div className="min-w-0 flex-1">
-                                    <h4 className="font-medium text-neutral-900 dark:text-white truncate">{ex.name}</h4>
-                                    <div className="flex items-center gap-2 sm:gap-3 text-xs sm:text-sm text-neutral-500 dark:text-neutral-400 mt-1 overflow-x-auto no-scrollbar">
+                                    <h4 className="font-medium text-white truncate">{ex.name}</h4>
+                                    <div className="flex items-center gap-2 sm:gap-3 text-xs sm:text-sm text-neutral-400 mt-1 overflow-x-auto no-scrollbar">
                                       {ex.isCardio ? (
-                                        <span className="text-orange-600 dark:text-orange-400 italic whitespace-nowrap">{ex.prescription || "Sem prescrição"}</span>
+                                        <span className="text-orange-400 italic whitespace-nowrap">{ex.prescription || "Sem prescrição"}</span>
                                       ) : (
                                         <>
                                           <span className="whitespace-nowrap">{ex.sets} séries</span>
-                                          <span className="w-1 h-1 bg-neutral-300 dark:bg-neutral-600 rounded-full shrink-0"></span>
+                                          <span className="w-1 h-1 bg-neutral-600 rounded-full shrink-0"></span>
                                           <span className="whitespace-nowrap">{ex.reps} reps</span>
-                                          <span className="w-1 h-1 bg-neutral-300 dark:bg-neutral-600 rounded-full shrink-0"></span>
-                                          <span className="flex items-center gap-1 text-blue-600 dark:text-blue-400 whitespace-nowrap"><Clock className="w-3 h-3" /> {ex.rest}s</span>
+                                          <span className="w-1 h-1 bg-neutral-600 rounded-full shrink-0"></span>
+                                          <span className="flex items-center gap-1 text-blue-400 whitespace-nowrap"><Clock className="w-3 h-3" /> {ex.rest}s</span>
                                         </>
                                       )}
                                     </div>
@@ -1035,7 +986,7 @@ function WorkoutBuilder({ client, onBack, existingWorkout }: { client: any, onBa
                                 </div>
                                 <button 
                                   onClick={() => removeExercise(ex.id)}
-                                  className="p-2 text-neutral-400 dark:text-neutral-500 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors shrink-0 ml-2"
+                                  className="p-2 text-neutral-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors shrink-0 ml-2"
                                 >
                                   <Trash2 className="w-5 h-5 sm:w-4 sm:h-4" />
                                 </button>
@@ -1050,12 +1001,12 @@ function WorkoutBuilder({ client, onBack, existingWorkout }: { client: any, onBa
                 </Droppable>
               </DragDropContext>
 
-              <div className="p-6 bg-white dark:bg-neutral-900 border-t border-neutral-100 dark:border-white/10 flex flex-col sm:flex-row gap-4">
+              <div className="p-6 bg-neutral-900 border-t border-white/10 flex flex-col sm:flex-row gap-4">
                 {existingWorkout && (
                   <button
                     type="button"
                     onClick={() => deleteWorkout(existingWorkout.id)}
-                    className="flex-1 bg-red-500/10 hover:bg-red-500/20 text-red-600 dark:text-red-500 font-bold py-4 rounded-xl transition-all flex items-center justify-center gap-2 border border-red-500/20 order-2 sm:order-1"
+                    className="flex-1 bg-red-500/10 hover:bg-red-500/20 text-red-500 font-bold py-4 rounded-xl transition-all flex items-center justify-center gap-2 border border-red-500/20 order-2 sm:order-1"
                   >
                     <Trash2 className="w-5 h-5" /> Excluir Treino
                   </button>
@@ -1166,11 +1117,11 @@ function WorkoutHistory({ client, onBack }: { client: any, onBack: () => void })
               setSelectedWorkout(null);
               fetchWorkouts();
             }} 
-            className="p-2 bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-700 rounded-xl transition-colors"
+            className="p-2 bg-neutral-800 hover:bg-neutral-700 rounded-xl transition-colors"
           >
-            <ArrowLeft className="w-5 h-5 text-neutral-900 dark:text-white" />
+            <ArrowLeft className="w-5 h-5 text-white" />
           </button>
-          <h2 className="text-2xl font-bold text-neutral-900 dark:text-white">Detalhes do Treino</h2>
+          <h2 className="text-2xl font-bold text-white">Detalhes do Treino</h2>
         </div>
         <ClientWorkoutView 
           workout={selectedWorkout} 
@@ -1187,18 +1138,18 @@ function WorkoutHistory({ client, onBack }: { client: any, onBack: () => void })
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-4">
-        <button onClick={onBack} className="p-2 bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-700 rounded-xl transition-colors">
-          <ArrowLeft className="w-5 h-5 text-neutral-900 dark:text-white" />
+        <button onClick={onBack} className="p-2 bg-neutral-800 hover:bg-neutral-700 rounded-xl transition-colors">
+          <ArrowLeft className="w-5 h-5 text-white" />
         </button>
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
-            <h2 className="text-2xl font-bold text-neutral-900 dark:text-white">Histórico de Treinos</h2>
-            <p className="text-sm text-neutral-500 dark:text-neutral-400">Aluno: <span className="text-orange-600 dark:text-orange-500 font-medium">{client.name}</span></p>
+            <h2 className="text-2xl font-bold text-white">Histórico de Treinos</h2>
+            <p className="text-sm text-neutral-400">Aluno: <span className="text-orange-500 font-medium">{client.name}</span></p>
           </div>
           {workouts.length > 0 && (
             <button 
               onClick={clearAllHistory}
-              className="flex items-center justify-center gap-2 px-4 py-2 bg-red-500/10 hover:bg-red-500 text-red-600 dark:text-red-500 hover:text-white border border-red-500/20 rounded-xl transition-all text-sm font-medium"
+              className="flex items-center justify-center gap-2 px-4 py-2 bg-red-500/10 hover:bg-red-500 text-red-500 hover:text-white border border-red-500/20 rounded-xl transition-all text-sm font-medium"
             >
               <Trash2 className="w-4 h-4" /> Limpar Todo o Histórico
             </button>
@@ -1211,9 +1162,9 @@ function WorkoutHistory({ client, onBack }: { client: any, onBack: () => void })
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-orange-600"></div>
         </div>
       ) : workouts.length === 0 ? (
-        <div className="bg-white dark:bg-neutral-900 p-12 rounded-2xl border border-neutral-200 dark:border-white/10 shadow-2xl text-center">
-          <Activity className="w-12 h-12 text-neutral-300 dark:text-neutral-700 mx-auto mb-4" />
-          <h3 className="text-xl font-medium text-neutral-900 dark:text-white mb-2">Nenhum treino encontrado</h3>
+        <div className="bg-neutral-900 p-12 rounded-2xl border border-white/10 shadow-2xl text-center">
+          <Activity className="w-12 h-12 text-neutral-700 mx-auto mb-4" />
+          <h3 className="text-xl font-medium text-white mb-2">Nenhum treino encontrado</h3>
           <p className="text-neutral-500">Este aluno ainda não possui treinos registrados.</p>
         </div>
       ) : (
@@ -1221,21 +1172,21 @@ function WorkoutHistory({ client, onBack }: { client: any, onBack: () => void })
           {workouts.map((workout) => (
             <div 
               key={workout.id}
-              className="bg-white dark:bg-neutral-900 p-6 rounded-2xl border border-neutral-200 dark:border-white/10 shadow-2xl flex items-center justify-between hover:border-orange-600/50 transition-colors group"
+              className="bg-neutral-900 p-6 rounded-2xl border border-white/10 shadow-2xl flex items-center justify-between hover:border-orange-600/50 transition-colors group"
             >
               <div className="flex items-center gap-4 cursor-pointer flex-1" onClick={() => setSelectedWorkout(workout)}>
                 <div className="w-12 h-12 bg-orange-600/10 rounded-full flex items-center justify-center">
-                  <CalendarIcon className="w-6 h-6 text-orange-600 dark:text-orange-500" />
+                  <CalendarIcon className="w-6 h-6 text-orange-500" />
                 </div>
                 <div>
-                  <h3 className="text-lg font-medium text-neutral-900 dark:text-white">
+                  <h3 className="text-lg font-medium text-white">
                     Treino de {new Date(workout.date).toLocaleDateString('pt-BR')}
                   </h3>
-                  <p className="text-sm text-neutral-500 dark:text-neutral-400">
+                  <p className="text-sm text-neutral-400">
                     {workout.exercises.length} exercícios • Status: {workout.status === 'active' ? (
-                      <span className="text-blue-600 dark:text-blue-400">Ativo</span>
+                      <span className="text-blue-400">Ativo</span>
                     ) : (
-                      <span className="text-emerald-600 dark:text-emerald-400 flex items-center gap-1 inline-flex">
+                      <span className="text-emerald-400 flex items-center gap-1 inline-flex">
                         <CheckCircle2 className="w-3 h-3" /> Concluído
                       </span>
                     )}
@@ -1620,45 +1571,45 @@ function PersonalDashboard() {
   if (selectedClient) {
     return (
       <div className="space-y-6">
-        <div className="flex items-center justify-between gap-4 bg-white dark:bg-neutral-900 p-4 rounded-2xl border border-neutral-200 dark:border-white/10 shadow-xl">
-          <div className="flex items-center gap-3">
-            <button onClick={() => setSelectedClient(null)} className="p-2 hover:bg-neutral-100 dark:hover:bg-white/5 rounded-xl transition-colors">
-              <ArrowLeft className="w-5 h-5 text-neutral-900 dark:text-white" />
-            </button>
-            <div>
-              <h2 className="text-lg font-bold text-neutral-900 dark:text-white leading-tight">{selectedClient.displayName || selectedClient.name}</h2>
-              <p className="text-[10px] text-neutral-500 uppercase tracking-wider">Perfil do Aluno</p>
-            </div>
+        <div className="flex items-center justify-between gap-4 bg-neutral-900 p-4 rounded-2xl border border-white/10 shadow-xl">
+        <div className="flex items-center gap-3">
+          <button onClick={() => setSelectedClient(null)} className="p-2 hover:bg-white/5 rounded-xl transition-colors">
+            <ArrowLeft className="w-5 h-5 text-white" />
+          </button>
+          <div>
+            <h2 className="text-lg font-bold text-white leading-tight">{selectedClient.displayName || selectedClient.name}</h2>
+            <p className="text-[10px] text-neutral-500 uppercase tracking-wider">Perfil do Aluno</p>
           </div>
-          <button
-            onClick={() => setChatRoom({ id: `chat_${user?.id}_${selectedClient.id}`, name: selectedClient.displayName || selectedClient.name })}
-            className="flex items-center gap-2 bg-orange-600 hover:bg-orange-500 text-white px-4 py-2 rounded-xl transition-all shadow-lg shadow-orange-600/20 font-bold text-sm"
-          >
-            <MessageSquare className="w-4 h-4" />
-            Chat
-          </button>
         </div>
+        <button
+          onClick={() => setChatRoom({ id: `chat_${user?.id}_${selectedClient.id}`, name: selectedClient.displayName || selectedClient.name })}
+          className="flex items-center gap-2 bg-orange-600 hover:bg-orange-500 text-white px-4 py-2 rounded-xl transition-all shadow-lg shadow-orange-600/20 font-bold text-sm"
+        >
+          <MessageSquare className="w-4 h-4" />
+          Chat
+        </button>
+      </div>
 
-        <div className="flex bg-white dark:bg-neutral-900 p-1 rounded-xl border border-neutral-200 dark:border-white/10 shadow-2xl w-full max-w-lg mx-auto mb-6">
-          <button
-            onClick={() => setClientTab("workouts")}
-            className={`flex-1 py-2 text-sm font-medium rounded-lg transition-colors ${clientTab === "workouts" ? "bg-orange-600 text-white shadow-md" : "text-neutral-500 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white"}`}
-          >
-            Novo Treino
-          </button>
-          <button
-            onClick={() => setClientTab("history")}
-            className={`flex-1 py-2 text-sm font-medium rounded-lg transition-colors ${clientTab === "history" ? "bg-orange-600 text-white shadow-md" : "text-neutral-500 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white"}`}
-          >
-            Histórico
-          </button>
-          <button
-            onClick={() => setClientTab("assessments")}
-            className={`flex-1 py-2 text-sm font-medium rounded-lg transition-colors ${clientTab === "assessments" ? "bg-orange-600 text-white shadow-md" : "text-neutral-500 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white"}`}
-          >
-            Avaliações
-          </button>
-        </div>
+      <div className="flex bg-neutral-900 p-1 rounded-xl border border-white/10 shadow-2xl w-full max-w-lg mx-auto mb-6">
+        <button
+          onClick={() => setClientTab("workouts")}
+          className={`flex-1 py-2 text-sm font-medium rounded-lg transition-colors ${clientTab === "workouts" ? "bg-orange-600 text-white shadow-md" : "text-neutral-400 hover:text-white"}`}
+        >
+          Novo Treino
+        </button>
+        <button
+          onClick={() => setClientTab("history")}
+          className={`flex-1 py-2 text-sm font-medium rounded-lg transition-colors ${clientTab === "history" ? "bg-orange-600 text-white shadow-md" : "text-neutral-400 hover:text-white"}`}
+        >
+          Histórico
+        </button>
+        <button
+          onClick={() => setClientTab("assessments")}
+          className={`flex-1 py-2 text-sm font-medium rounded-lg transition-colors ${clientTab === "assessments" ? "bg-orange-600 text-white shadow-md" : "text-neutral-400 hover:text-white"}`}
+        >
+          Avaliações
+        </button>
+      </div>
         
         {clientTab === "workouts" ? (
           <WorkoutBuilder client={selectedClient} onBack={() => setSelectedClient(null)} />
@@ -1678,13 +1629,13 @@ function PersonalDashboard() {
 
   return (
     <div className="space-y-6">
-      <div className="bg-white dark:bg-neutral-900 p-6 rounded-3xl border border-neutral-200 dark:border-white/10 shadow-2xl text-center mb-8 bg-gradient-to-br from-white dark:from-neutral-900 to-neutral-50 dark:to-neutral-950">
-        <h3 className="text-neutral-500 dark:text-neutral-400 text-xs font-medium mb-2 uppercase tracking-widest">Seu Código de Convite</h3>
+      <div className="bg-neutral-900 p-6 rounded-3xl border border-white/10 shadow-2xl text-center mb-8 bg-gradient-to-br from-neutral-900 to-neutral-950">
+        <h3 className="text-neutral-400 text-xs font-medium mb-2 uppercase tracking-widest">Seu Código de Convite</h3>
         <div className="flex flex-col items-center gap-3">
           <div className="text-3xl font-black text-orange-500 font-mono tracking-tighter bg-orange-600/10 px-6 py-4 rounded-2xl border border-orange-500/20 shadow-[0_0_20px_rgba(249,115,22,0.1)]">
             {user?.personalCode}
           </div>
-          <p className="text-neutral-500 dark:text-neutral-500 text-[10px] max-w-[180px] leading-relaxed">
+          <p className="text-neutral-500 text-[10px] max-w-[180px] leading-relaxed">
             Compartilhe este código com seus alunos para que eles se conectem ao seu perfil.
           </p>
         </div>
@@ -1692,7 +1643,7 @@ function PersonalDashboard() {
 
       <div className="flex justify-between items-center">
         <div>
-          <h2 className="text-2xl font-bold text-neutral-900 dark:text-white">Meus Alunos</h2>
+          <h2 className="text-2xl font-bold text-white">Meus Alunos</h2>
         </div>
         <button
           onClick={() => setShowAdd(!showAdd)}
@@ -1707,7 +1658,7 @@ function PersonalDashboard() {
         <select
           value={sortBy}
           onChange={(e) => setSortBy(e.target.value as "name" | "date")}
-          className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-white/10 text-neutral-900 dark:text-white text-sm rounded-lg focus:ring-orange-600 focus:border-orange-600 block p-2.5"
+          className="bg-neutral-900 border border-white/10 text-white text-sm rounded-lg focus:ring-orange-600 focus:border-orange-600 block p-2.5"
         >
           <option value="name">Ordem Alfabética</option>
           <option value="date">Data de Cadastro</option>
@@ -1715,16 +1666,16 @@ function PersonalDashboard() {
       </div>
 
       {showAdd && (
-        <div className="bg-white dark:bg-neutral-900 p-6 rounded-2xl border border-neutral-200 dark:border-white/10 shadow-2xl space-y-6">
+        <div className="bg-neutral-900 p-6 rounded-2xl border border-white/10 shadow-2xl space-y-6">
           <div>
-            <h3 className="text-lg font-medium text-neutral-900 dark:text-white mb-4">Convidar por Email</h3>
+            <h3 className="text-lg font-medium text-white mb-4">Convidar por Email</h3>
             <form onSubmit={sendInvite} className="flex gap-2">
               <input
                 type="email"
                 placeholder="email@aluno.com"
                 value={inviteEmail}
                 onChange={(e) => setInviteEmail(e.target.value)}
-                className="flex-1 bg-neutral-50 dark:bg-neutral-800 border border-neutral-200 dark:border-white/10 rounded-xl px-4 py-2 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-orange-500"
+                className="flex-1 bg-neutral-800 border border-white/10 rounded-xl px-4 py-2 text-white focus:outline-none focus:ring-2 focus:ring-orange-500"
                 required
               />
               <button
@@ -1737,24 +1688,24 @@ function PersonalDashboard() {
               </button>
             </form>
             {inviteStatus && (
-              <p className={`mt-2 text-sm ${inviteStatus.type === 'success' ? 'text-green-500 dark:text-green-400' : 'text-red-500 dark:text-red-400'}`}>
+              <p className={`mt-2 text-sm ${inviteStatus.type === 'success' ? 'text-green-400' : 'text-red-400'}`}>
                 {inviteStatus.message}
               </p>
             )}
           </div>
 
-          <div className="border-t border-neutral-100 dark:border-white/5 pt-6">
-            <h3 className="text-lg font-medium text-neutral-900 dark:text-white mb-4">Alunos Disponíveis</h3>
+          <div className="border-t border-white/5 pt-6">
+            <h3 className="text-lg font-medium text-white mb-4">Alunos Disponíveis</h3>
             <div className="grid gap-4">
               {allClients.filter(c => !clients.find(myClient => myClient.id === c.id)).map(client => (
-                <div key={client.id} className="flex items-center justify-between bg-neutral-50 dark:bg-neutral-800 p-4 rounded-xl border border-neutral-200 dark:border-white/10">
+                <div key={client.id} className="flex items-center justify-between bg-neutral-800 p-4 rounded-xl border border-white/10">
                   <div>
-                    <div className="font-medium text-neutral-900 dark:text-white">{client.name}</div>
-                    <div className="text-sm text-neutral-500 dark:text-neutral-400">{client.email}</div>
+                    <div className="font-medium text-white">{client.name}</div>
+                    <div className="text-sm text-neutral-400">{client.email}</div>
                   </div>
                   <button
                     onClick={() => addClient(client.id)}
-                    className="text-orange-600 dark:text-orange-500 hover:text-orange-500 dark:hover:text-orange-400 bg-orange-600/10 hover:bg-orange-600/20 px-4 py-2 rounded-lg transition-colors text-sm font-medium"
+                    className="text-orange-500 hover:text-orange-400 bg-orange-600/10 hover:bg-orange-600/20 px-4 py-2 rounded-lg transition-colors text-sm font-medium"
                   >
                     Conectar
                   </button>
@@ -1768,17 +1719,17 @@ function PersonalDashboard() {
         </div>
       )}
 
-      <div className="bg-white dark:bg-neutral-900 rounded-lg border border-neutral-200 dark:border-white/10 shadow-2xl overflow-hidden">
+      <div className="bg-neutral-900 rounded-lg border border-white/10 shadow-2xl overflow-hidden">
         {sortedClients.length === 0 ? (
           <div className="p-12 text-center">
             <img src="https://i.imgur.com/fxOHjtK.png" alt="Track & Health Logo" className="w-16 h-16 object-contain mx-auto mb-4 opacity-50 grayscale" referrerPolicy="no-referrer" />
-            <h3 className="text-xl font-medium text-neutral-900 dark:text-white mb-2">Nenhum aluno ainda</h3>
+            <h3 className="text-xl font-medium text-white mb-2">Nenhum aluno ainda</h3>
             <p className="text-neutral-500">Clique no botão Adicionar Aluno para começar a montar sua lista.</p>
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm text-neutral-500 dark:text-neutral-400">
-              <thead className="bg-neutral-50 dark:bg-neutral-800 text-xs uppercase text-neutral-500 border-b border-neutral-200 dark:border-white/10">
+            <table className="w-full text-left text-sm text-neutral-400">
+              <thead className="bg-neutral-800 text-xs uppercase text-neutral-500 border-b border-white/10">
                 <tr>
                   <th className="px-4 py-3 font-medium">Aluno</th>
                   <th className="px-4 py-3 font-medium hidden sm:table-cell">Email</th>
@@ -1786,7 +1737,7 @@ function PersonalDashboard() {
                   <th className="px-4 py-3 font-medium text-right">Status</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-neutral-100 dark:divide-white/10">
+              <tbody className="divide-y divide-white/10">
                 {sortedClients.map(client => {
                   const dateStr = client.connectionDate || client.createdAt;
                   const formattedDate = dateStr ? new Date(dateStr).toLocaleDateString('pt-BR') : '--/--/----';
@@ -2000,16 +1951,16 @@ function ClientWorkoutView({ workout, onBack, isPersonal: isPersonalProp }: { wo
 
   return (
     <div className="space-y-6 pb-24">
-      <div className="flex items-center justify-between bg-white dark:bg-neutral-900 p-4 rounded-2xl border border-neutral-200 dark:border-white/10 shadow-xl">
+      <div className="flex items-center justify-between bg-neutral-900 p-4 rounded-2xl border border-white/10 shadow-xl">
         <div className="flex items-center gap-4">
-          <button onClick={onBack} className="p-2 bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-700 rounded-xl transition-colors">
-            <ArrowLeft className="w-5 h-5 text-neutral-900 dark:text-white" />
+          <button onClick={onBack} className="p-2 bg-neutral-800 hover:bg-neutral-700 rounded-xl transition-colors">
+            <ArrowLeft className="w-5 h-5 text-white" />
           </button>
           <div>
-            <h2 className="text-xl font-bold text-neutral-900 dark:text-white leading-tight">
+            <h2 className="text-xl font-bold text-white leading-tight">
               {isCompleted ? "Treino Concluído" : "Treino de Hoje"}
             </h2>
-            <p className="text-xs text-neutral-500 dark:text-neutral-400">
+            <p className="text-xs text-neutral-400">
               {new Date(workout.date).toLocaleDateString('pt-BR')}
             </p>
           </div>
@@ -2020,13 +1971,13 @@ function ClientWorkoutView({ workout, onBack, isPersonal: isPersonalProp }: { wo
               id: isPersonal ? `chat_${user?.id}_${workout.client_id}` : `chat_${workout.personal_id}_${user?.id}`, 
               name: recipientName 
             })}
-            className="flex items-center gap-2 bg-orange-600/10 hover:bg-orange-600 text-orange-600 dark:text-orange-500 hover:text-white px-3 py-2 rounded-xl border border-orange-500/20 transition-all font-bold text-xs"
+            className="flex items-center gap-2 bg-orange-600/10 hover:bg-orange-600 text-orange-500 hover:text-white px-3 py-2 rounded-xl border border-orange-500/20 transition-all font-bold text-xs"
           >
             <MessageSquare className="w-4 h-4" />
             Chat
           </button>
           {isCompleted && (
-            <div className="hidden sm:flex bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 px-4 py-2 rounded-full border border-emerald-500/20 items-center gap-2 font-medium">
+            <div className="hidden sm:flex bg-emerald-500/10 text-emerald-400 px-4 py-2 rounded-full border border-emerald-500/20 items-center gap-2 font-medium">
               <CheckCircle2 className="w-5 h-5" />
               Concluído
             </div>
@@ -2034,7 +1985,7 @@ function ClientWorkoutView({ workout, onBack, isPersonal: isPersonalProp }: { wo
           {isPersonal && (
             <button 
               onClick={deleteWorkout}
-              className="p-2 text-red-600 dark:text-red-500 hover:bg-red-500/10 rounded-xl transition-colors"
+              className="p-2 text-red-500 hover:bg-red-500/10 rounded-xl transition-colors"
               title="Excluir Treino"
             >
               <Trash2 className="w-6 h-6" />
@@ -2057,7 +2008,7 @@ function ClientWorkoutView({ workout, onBack, isPersonal: isPersonalProp }: { wo
           return (
             <div 
               key={ex.id} 
-              className={`bg-white dark:bg-neutral-900 rounded-2xl border transition-all overflow-hidden ${isExCompleted ? 'border-emerald-500/30' : 'border-neutral-200 dark:border-white/10 shadow-2xl'}`}
+              className={`bg-neutral-900 rounded-2xl border transition-all overflow-hidden ${isExCompleted ? 'border-emerald-500/30' : 'border-white/10 shadow-2xl'}`}
             >
               <div className="p-6">
                 <div className="flex items-start justify-between gap-4">
@@ -2074,25 +2025,25 @@ function ClientWorkoutView({ workout, onBack, isPersonal: isPersonalProp }: { wo
                       {isExCompleted ? <Check className="w-6 h-6" /> : index + 1}
                     </button>
                     <div>
-                      <h3 className={`text-xl font-bold transition-colors ${isExCompleted ? 'text-emerald-600 dark:text-emerald-400' : 'text-neutral-900 dark:text-white'}`}>
+                      <h3 className={`text-xl font-bold transition-colors ${isExCompleted ? 'text-emerald-400' : 'text-white'}`}>
                         {ex.name}
                       </h3>
                       <div className="flex flex-wrap items-center gap-2 mt-3">
                         {ex.isCardio ? (
-                          <span className="bg-orange-600/10 text-orange-600 dark:text-orange-400 px-3 py-1 rounded-lg border border-orange-500/20 font-medium italic text-sm">
+                          <span className="bg-orange-600/10 text-orange-400 px-3 py-1 rounded-lg border border-orange-500/20 font-medium italic text-sm">
                             {ex.prescription || "Sem prescrição"}
                           </span>
                         ) : (
                           <>
-                            <div className="flex items-center bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 px-3 py-1 rounded-lg border border-indigo-500/20">
+                            <div className="flex items-center bg-indigo-500/10 text-indigo-400 px-3 py-1 rounded-lg border border-indigo-500/20">
                               <span className="text-[10px] uppercase font-bold mr-1.5 opacity-70">Séries:</span>
                               <span className="font-bold">{ex.sets}</span>
                             </div>
-                            <div className="flex items-center bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 px-3 py-1 rounded-lg border border-emerald-500/20">
+                            <div className="flex items-center bg-emerald-500/10 text-emerald-400 px-3 py-1 rounded-lg border border-emerald-500/20">
                               <span className="text-[10px] uppercase font-bold mr-1.5 opacity-70">Reps:</span>
                               <span className="font-bold">{ex.reps}</span>
                             </div>
-                            <div className="flex items-center bg-amber-500/10 text-amber-600 dark:text-amber-400 px-3 py-1 rounded-lg border border-amber-500/20">
+                            <div className="flex items-center bg-amber-500/10 text-amber-400 px-3 py-1 rounded-lg border border-amber-500/20">
                               <span className="text-[10px] uppercase font-bold mr-1.5 opacity-70">Carga:</span>
                               {isCompleted || isPersonal ? (
                                 <span className="font-bold">{exerciseLoads[ex.id] || "--"}</span>
@@ -2102,7 +2053,7 @@ function ClientWorkoutView({ workout, onBack, isPersonal: isPersonalProp }: { wo
                                   value={exerciseLoads[ex.id] || ""}
                                   onChange={(e) => setExerciseLoads(prev => ({ ...prev, [ex.id]: e.target.value }))}
                                   placeholder="0"
-                                  className="w-10 bg-transparent border-none text-amber-600 dark:text-amber-400 font-bold text-center p-0 focus:outline-none focus:ring-0"
+                                  className="w-10 bg-transparent border-none text-amber-400 font-bold text-center p-0 focus:outline-none focus:ring-0"
                                 />
                               )}
                               <span className="text-[10px] ml-1 opacity-70">kg</span>
@@ -2119,10 +2070,10 @@ function ClientWorkoutView({ workout, onBack, isPersonal: isPersonalProp }: { wo
                       disabled={isPersonal}
                       className={`px-4 py-2 rounded-xl font-bold transition-all flex items-center gap-2 shrink-0 self-start mt-1 ${
                         isExCompleted 
-                          ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 shadow-lg shadow-emerald-500/10' 
+                          ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 shadow-lg shadow-emerald-500/10' 
                           : isPersonal 
-                            ? 'bg-neutral-100 dark:bg-neutral-800/50 text-neutral-400 dark:text-neutral-500 border border-neutral-200 dark:border-white/5 cursor-not-allowed'
-                            : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 border border-neutral-200 dark:border-white/5 hover:bg-neutral-200 dark:hover:bg-neutral-700 hover:text-neutral-900 dark:hover:text-white'
+                            ? 'bg-neutral-800/50 text-neutral-500 border border-white/5 cursor-not-allowed'
+                            : 'bg-neutral-800 text-neutral-400 border border-white/5 hover:bg-neutral-700 hover:text-white'
                       }`}
                     >
                       {isExCompleted ? (
@@ -2135,7 +2086,7 @@ function ClientWorkoutView({ workout, onBack, isPersonal: isPersonalProp }: { wo
                 </div>
 
                 {ex.media && (
-                  <div className="mt-4 rounded-xl overflow-hidden border border-neutral-200 dark:border-white/5 bg-neutral-50 dark:bg-black/20">
+                  <div className="mt-4 rounded-xl overflow-hidden border border-white/5 bg-black/20">
                     {ex.media.type === 'image' ? (
                       <img 
                         src={ex.media.url} 
@@ -2155,16 +2106,16 @@ function ClientWorkoutView({ workout, onBack, isPersonal: isPersonalProp }: { wo
 
                 <div className="mt-6 space-y-4">
                   {!ex.isCardio && !isCompleted && !isPersonal && (
-                    <div className="pt-4 border-t border-neutral-100 dark:border-white/10">
+                    <div className="pt-4 border-t border-white/10">
                       {activeTimer === ex.id ? (
-                        <div className="bg-neutral-50 dark:bg-neutral-800 rounded-xl p-6 flex flex-col items-center justify-center border border-orange-600/30">
-                          <div className="text-4xl font-mono font-bold text-orange-600 dark:text-orange-500 mb-2">
+                        <div className="bg-neutral-800 rounded-xl p-6 flex flex-col items-center justify-center border border-orange-600/30">
+                          <div className="text-4xl font-mono font-bold text-orange-500 mb-2">
                             {formatTime(timeLeft)}
                           </div>
-                          <p className="text-sm text-neutral-500 dark:text-neutral-400">Descansando...</p>
+                          <p className="text-sm text-neutral-400">Descansando...</p>
                           <button 
                             onClick={() => setActiveTimer(null)}
-                            className="mt-4 text-sm text-neutral-500 hover:text-neutral-900 dark:hover:text-white transition-colors"
+                            className="mt-4 text-sm text-neutral-500 hover:text-white transition-colors"
                           >
                             Cancelar
                           </button>
@@ -2172,9 +2123,9 @@ function ClientWorkoutView({ workout, onBack, isPersonal: isPersonalProp }: { wo
                       ) : (
                         <button
                           onClick={() => startTimer(ex.id, ex.rest)}
-                          className="w-full bg-neutral-50 dark:bg-neutral-800 hover:bg-neutral-100 dark:hover:bg-neutral-700 border border-neutral-200 dark:border-white/10 text-neutral-900 dark:text-white font-medium py-4 rounded-xl transition-colors flex items-center justify-center gap-2"
+                          className="w-full bg-neutral-800 hover:bg-neutral-700 border border-white/10 text-white font-medium py-4 rounded-xl transition-colors flex items-center justify-center gap-2"
                         >
-                          <Clock className="w-5 h-5 text-orange-600 dark:text-orange-500" />
+                          <Clock className="w-5 h-5 text-orange-500" />
                           Iniciar Descanso ({ex.rest}s)
                         </button>
                       )}
@@ -2182,13 +2133,13 @@ function ClientWorkoutView({ workout, onBack, isPersonal: isPersonalProp }: { wo
                   )}
 
                   {(isPersonal || isCompleted || !isPersonal) && (
-                    <div className="pt-4 border-t border-neutral-100 dark:border-white/10">
-                      <div className="flex items-center gap-2 mb-2 text-sm font-medium text-neutral-500 dark:text-neutral-400">
-                        <MessageSquare className="w-4 h-4 text-orange-600 dark:text-orange-500" />
+                    <div className="pt-4 border-t border-white/10">
+                      <div className="flex items-center gap-2 mb-2 text-sm font-medium text-neutral-400">
+                        <MessageSquare className="w-4 h-4 text-orange-500" />
                         Feedback do Exercício
                       </div>
                       {isPersonal || isCompleted ? (
-                        <p className="text-sm text-neutral-600 dark:text-neutral-300 bg-neutral-50 dark:bg-neutral-800/50 p-3 rounded-xl border border-neutral-200 dark:border-white/5 italic">
+                        <p className="text-sm text-neutral-300 bg-neutral-800/50 p-3 rounded-xl border border-white/5 italic">
                           {exerciseFeedback[ex.id] || "Nenhum feedback fornecido."}
                         </p>
                       ) : (
@@ -2196,7 +2147,7 @@ function ClientWorkoutView({ workout, onBack, isPersonal: isPersonalProp }: { wo
                           value={exerciseFeedback[ex.id] || ""}
                           onChange={(e) => handleExerciseFeedback(ex.id, e.target.value)}
                           placeholder="Como foi este exercício? (Ex: Peso leve, dor no ombro...)"
-                          className="w-full bg-neutral-50 dark:bg-neutral-800 border border-neutral-200 dark:border-white/10 rounded-xl px-4 py-3 text-neutral-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-orange-600 transition-all min-h-[80px]"
+                          className="w-full bg-neutral-800 border border-white/10 rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:ring-2 focus:ring-orange-600 transition-all min-h-[80px]"
                         />
                       )}
                     </div>
@@ -2208,13 +2159,13 @@ function ClientWorkoutView({ workout, onBack, isPersonal: isPersonalProp }: { wo
         })}
       </div>
 
-      <div className="bg-white dark:bg-neutral-900 rounded-2xl border border-neutral-200 dark:border-white/10 shadow-2xl p-6 mt-8">
-        <h3 className="text-xl font-bold text-neutral-900 dark:text-white mb-4 flex items-center gap-2">
-          <MessageSquare className="w-6 h-6 text-orange-600 dark:text-orange-500" />
+      <div className="bg-neutral-900 rounded-2xl border border-white/10 shadow-2xl p-6 mt-8">
+        <h3 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
+          <MessageSquare className="w-6 h-6 text-orange-500" />
           Feedback Geral do Treino
         </h3>
         {isPersonal || isCompleted ? (
-          <p className="text-neutral-600 dark:text-neutral-300 bg-neutral-50 dark:bg-neutral-800/50 p-4 rounded-xl border border-neutral-200 dark:border-white/5 italic">
+          <p className="text-neutral-300 bg-neutral-800/50 p-4 rounded-xl border border-white/5 italic">
             {overallFeedback || "Nenhum feedback geral fornecido."}
           </p>
         ) : (
@@ -2222,7 +2173,7 @@ function ClientWorkoutView({ workout, onBack, isPersonal: isPersonalProp }: { wo
             value={overallFeedback}
             onChange={(e) => setOverallFeedback(e.target.value)}
             placeholder="Conte ao seu personal como foi o treino de hoje no geral..."
-            className="w-full bg-neutral-50 dark:bg-neutral-800 border border-neutral-200 dark:border-white/10 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-orange-600 transition-all min-h-[120px]"
+            className="w-full bg-neutral-800 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-orange-600 transition-all min-h-[120px]"
           />
         )}
 
@@ -2244,9 +2195,9 @@ function ClientWorkoutsList({ workouts, onSelectWorkout }: { workouts: any[], on
   return (
     <div className="space-y-3">
       {workouts.length === 0 ? (
-        <div className="bg-white dark:bg-neutral-900 p-12 rounded-2xl border border-neutral-200 dark:border-white/10 text-center">
-          <Activity className="w-12 h-12 text-neutral-300 dark:text-neutral-700 mx-auto mb-4" />
-          <h3 className="text-xl font-medium text-neutral-900 dark:text-white mb-2">Nenhum treino encontrado</h3>
+        <div className="bg-neutral-900 p-12 rounded-2xl border border-white/10 text-center">
+          <Activity className="w-12 h-12 text-neutral-700 mx-auto mb-4" />
+          <h3 className="text-xl font-medium text-white mb-2">Nenhum treino encontrado</h3>
           <p className="text-neutral-500">Seu treinador ainda não atribuiu um treino para você.</p>
         </div>
       ) : (
@@ -2254,32 +2205,32 @@ function ClientWorkoutsList({ workouts, onSelectWorkout }: { workouts: any[], on
           <div 
             key={workout.id}
             onClick={() => onSelectWorkout(workout)}
-            className="bg-white dark:bg-neutral-900 p-6 rounded-2xl border border-neutral-200 dark:border-white/10 hover:border-orange-600 cursor-pointer transition-all shadow-xl hover:shadow-orange-600/5 flex items-center justify-between group"
+            className="bg-neutral-900 p-6 rounded-2xl border border-white/10 hover:border-orange-600 cursor-pointer transition-all shadow-xl hover:shadow-orange-600/5 flex items-center justify-between group"
           >
             <div className="flex items-center gap-4">
               <div className={`w-12 h-12 rounded-full flex items-center justify-center transition-colors ${
-                workout.status === 'completed' ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-500' : 'bg-orange-600/10 text-orange-600 dark:text-orange-500'
+                workout.status === 'completed' ? 'bg-emerald-500/10 text-emerald-500' : 'bg-orange-600/10 text-orange-500'
               }`}>
                 <CalendarIcon className="w-6 h-6" />
               </div>
               <div>
-                <h4 className="font-bold text-neutral-900 dark:text-white text-lg">Treino</h4>
+                <h4 className="font-bold text-white text-lg">Treino</h4>
                 <p className="text-sm text-neutral-500">{new Date(workout.date).toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' })}</p>
               </div>
             </div>
             <div className="flex items-center gap-4">
               <div className="text-right hidden sm:block">
-                <p className="text-xs font-bold uppercase tracking-wider text-neutral-400 dark:text-neutral-600 mb-1">Status</p>
+                <p className="text-xs font-bold uppercase tracking-wider text-neutral-600 mb-1">Status</p>
                 <span className={`text-xs font-bold px-3 py-1 rounded-full border ${
                   workout.status === 'completed' 
-                    ? 'text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border-emerald-500/20' 
-                    : 'text-blue-600 dark:text-blue-400 bg-blue-500/10 border-blue-500/20'
+                    ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' 
+                    : 'text-blue-400 bg-blue-500/10 border-blue-500/20'
                 }`}>
                   {workout.status === 'completed' ? 'Concluído' : 'Disponível'}
                 </span>
               </div>
-              <div className="w-10 h-10 rounded-xl bg-neutral-100 dark:bg-neutral-800 flex items-center justify-center group-hover:bg-orange-600 transition-colors">
-                <Play className="w-5 h-5 text-neutral-600 dark:text-white group-hover:text-white" />
+              <div className="w-10 h-10 rounded-xl bg-neutral-800 flex items-center justify-center group-hover:bg-orange-600 transition-colors">
+                <Play className="w-5 h-5 text-white group-hover:text-white" />
               </div>
             </div>
           </div>
@@ -2365,18 +2316,18 @@ function ClientDashboard({ onViewAllWorkouts, onViewSubscriptions }: { onViewAll
         <div className="absolute -right-4 -bottom-4 w-32 h-32 bg-white/10 rounded-full blur-3xl group-hover:scale-150 transition-transform duration-700"></div>
       </button>
 
-      <h2 className="text-2xl font-bold text-neutral-900 dark:text-white">Meus Treinadores</h2>
+      <h2 className="text-2xl font-bold text-white">Meus Treinadores</h2>
       
       <div className="grid gap-4">
         {personals.length === 0 ? (
-          <div className="bg-white dark:bg-neutral-900 p-12 rounded-2xl border border-neutral-200 dark:border-white/10 shadow-2xl text-center">
+          <div className="bg-neutral-900 p-12 rounded-2xl border border-white/10 shadow-2xl text-center">
             <img src="https://i.imgur.com/fxOHjtK.png" alt="Track & Health Logo" className="w-16 h-16 object-contain mx-auto mb-4 opacity-50 grayscale" referrerPolicy="no-referrer" />
-            <h3 className="text-xl font-medium text-neutral-900 dark:text-white mb-2">Nenhum treinador conectado</h3>
+            <h3 className="text-xl font-medium text-white mb-2">Nenhum treinador conectado</h3>
             <p className="text-neutral-500">Um personal trainer adicionará você à lista dele.</p>
           </div>
         ) : (
           personals.map(personal => (
-            <div key={personal.id} className="bg-white dark:bg-neutral-900 p-6 rounded-2xl border border-neutral-200 dark:border-white/10 shadow-2xl flex items-center justify-between">
+            <div key={personal.id} className="bg-neutral-900 p-6 rounded-2xl border border-white/10 shadow-2xl flex items-center justify-between">
               <div className="flex items-center gap-4">
                 {personal.photoUrl ? (
                   <img src={personal.photoUrl} alt="Profile" className="w-12 h-12 rounded-full object-cover border border-blue-500" />
@@ -2386,8 +2337,8 @@ function ClientDashboard({ onViewAllWorkouts, onViewSubscriptions }: { onViewAll
                   </div>
                 )}
                 <div>
-                  <h3 className="text-lg font-medium text-neutral-900 dark:text-white">{personal.displayName || personal.name}</h3>
-                  <p className="text-sm text-neutral-500 dark:text-neutral-400">{personal.email}</p>
+                  <h3 className="text-lg font-medium text-white">{personal.displayName || personal.name}</h3>
+                  <p className="text-sm text-neutral-400">{personal.email}</p>
                 </div>
               </div>
               <div className="flex items-center gap-2">
@@ -2396,8 +2347,8 @@ function ClientDashboard({ onViewAllWorkouts, onViewSubscriptions }: { onViewAll
                   disabled={personal.status === "blocked"}
                   className={`p-2 rounded-lg transition-colors flex items-center gap-2 ${
                     personal.status === "blocked" 
-                      ? "text-neutral-300 dark:text-neutral-600 cursor-not-allowed" 
-                      : "text-orange-600 dark:text-orange-500 hover:bg-orange-500/10"
+                      ? "text-neutral-600 cursor-not-allowed" 
+                      : "text-orange-500 hover:bg-orange-500/10"
                   }`}
                 >
                   <MessageSquare className="w-5 h-5" />
@@ -2405,8 +2356,8 @@ function ClientDashboard({ onViewAllWorkouts, onViewSubscriptions }: { onViewAll
                 </button>
                 <span className={`px-3 py-1 rounded-full text-xs font-medium border ${
                   personal.status === "blocked"
-                    ? "bg-red-500/10 text-red-500 dark:text-red-400 border-red-500/20"
-                    : "bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20"
+                    ? "bg-red-500/10 text-red-400 border-red-500/20"
+                    : "bg-blue-500/10 text-blue-400 border-blue-500/20"
                 }`}>
                   {personal.status === "blocked" ? "Bloqueado" : "Conectado"}
                 </span>
@@ -2425,11 +2376,11 @@ function ClientDashboard({ onViewAllWorkouts, onViewSubscriptions }: { onViewAll
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-8">
-        <div className="bg-white dark:bg-neutral-900 p-6 rounded-2xl border border-neutral-200 dark:border-white/10 shadow-2xl">
+        <div className="bg-neutral-900 p-6 rounded-2xl border border-white/10 shadow-2xl">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-3">
               <Activity className="w-5 h-5 text-orange-500" />
-              <h3 className="text-lg font-medium text-neutral-900 dark:text-white">Meus Treinos</h3>
+              <h3 className="text-lg font-medium text-white">Meus Treinos</h3>
             </div>
           </div>
           
@@ -2438,16 +2389,16 @@ function ClientDashboard({ onViewAllWorkouts, onViewSubscriptions }: { onViewAll
           {workouts.length > 3 && (
             <button 
               onClick={onViewAllWorkouts}
-              className="w-full mt-4 py-2 text-orange-600 dark:text-orange-500 hover:text-orange-500 dark:hover:text-orange-400 text-xs font-bold uppercase tracking-widest border border-orange-500/20 rounded-xl hover:bg-orange-500/5 transition-all"
+              className="w-full mt-4 py-2 text-orange-500 hover:text-orange-400 text-xs font-bold uppercase tracking-widest border border-orange-500/20 rounded-xl hover:bg-orange-500/5 transition-all"
             >
               Ver Todos os Treinos
             </button>
           )}
         </div>
-        <div className="bg-white dark:bg-neutral-900 p-6 rounded-2xl border border-neutral-200 dark:border-white/10 shadow-2xl">
+        <div className="bg-neutral-900 p-6 rounded-2xl border border-white/10 shadow-2xl">
           <div className="flex items-center gap-3 mb-4">
             <User className="w-5 h-5 text-orange-500" />
-            <h3 className="text-lg font-medium text-neutral-900 dark:text-white">Progresso</h3>
+            <h3 className="text-lg font-medium text-white">Progresso</h3>
           </div>
           <p className="text-neutral-500 text-sm">Continue treinando para ver seus gráficos de progresso aqui.</p>
         </div>
@@ -2832,20 +2783,20 @@ function ClientWorkoutsTab() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-3xl font-black text-neutral-900 dark:text-white tracking-tight">Meus Treinos</h2>
+          <h2 className="text-3xl font-black text-white tracking-tight">Meus Treinos</h2>
           <p className="text-neutral-500 text-sm">Acompanhe sua jornada e execute seus treinos.</p>
         </div>
         <div className="bg-orange-600/10 px-4 py-2 rounded-xl border border-orange-500/20">
-          <span className="text-orange-600 dark:text-orange-500 font-bold text-sm">{workouts.length} Treinos</span>
+          <span className="text-orange-500 font-bold text-sm">{workouts.length} Treinos</span>
         </div>
       </div>
 
-      <div className="bg-neutral-100 dark:bg-neutral-900/50 p-4 rounded-xl border border-neutral-200 dark:border-white/5 flex items-center gap-3">
+      <div className="bg-neutral-900/50 p-4 rounded-xl border border-white/5 flex items-center gap-3">
         <div className="w-10 h-10 bg-orange-600/20 rounded-full flex items-center justify-center shrink-0">
-          <Activity className="w-5 h-5 text-orange-600 dark:text-orange-500" />
+          <Activity className="w-5 h-5 text-orange-500" />
         </div>
         <div>
-          <p className="text-neutral-900 dark:text-white font-bold text-sm">verificar pendencias</p>
+          <p className="text-white font-bold text-sm">verificar pendencias</p>
           <p className="text-neutral-500 text-xs">nao pare agora! Mantenha seus pagamentos em dia para continuar treinando.</p>
         </div>
       </div>
@@ -2864,13 +2815,12 @@ function ClientWorkoutsTab() {
 
 function Dashboard() {
   const { user, loading, logout } = useAuth();
-  const { theme, toggleTheme } = useTheme();
   const [activeTab, setActiveTab] = useState("home");
 
   // Se estiver carregando OU se estiver logado no Firebase mas o perfil ainda não chegou do Firestore
   if (loading || (auth.currentUser && !user)) {
     return (
-      <div className="min-h-screen bg-neutral-50 dark:bg-neutral-950 flex flex-col items-center justify-center text-neutral-700 dark:text-neutral-200">
+      <div className="min-h-screen bg-neutral-950 flex flex-col items-center justify-center text-neutral-200">
         <div className="w-12 h-12 border-4 border-orange-500/20 border-t-orange-500 rounded-full animate-spin mb-4"></div>
         <p className="text-sm font-medium animate-pulse">Sincronizando seu perfil...</p>
       </div>
@@ -2886,26 +2836,26 @@ function Dashboard() {
   }
 
   return (
-    <div className="min-h-screen bg-neutral-50 dark:bg-neutral-950 font-sans text-neutral-700 dark:text-neutral-200 pb-20 sm:pb-0">
-      <nav className="bg-white dark:bg-neutral-900 border-b border-neutral-200 dark:border-white/10 sticky top-0 z-10 hidden sm:block">
+    <div className="min-h-screen bg-neutral-950 font-sans text-neutral-200 pb-20 sm:pb-0">
+      <nav className="bg-neutral-900 border-b border-white/10 sticky top-0 z-10 hidden sm:block">
         <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between h-16 items-center">
             <div className="flex items-center gap-8">
               <button onClick={() => setActiveTab("home")} className="flex items-center gap-2 hover:opacity-80 transition-opacity">
                 <img src="https://i.imgur.com/fxOHjtK.png" alt="Track & Health Logo" className="w-8 h-8 object-contain" referrerPolicy="no-referrer" />
-                <span className="font-bold text-xl tracking-tight text-neutral-900 dark:text-white">Track & Health</span>
+                <span className="font-bold text-xl tracking-tight text-white">Track & Health</span>
               </button>
               
               <div className="flex items-center gap-1">
                 <button 
                   onClick={() => setActiveTab("home")}
-                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${activeTab === "home" ? "bg-neutral-100 dark:bg-white/10 text-neutral-900 dark:text-white" : "text-neutral-500 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-white/5"}`}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${activeTab === "home" ? "bg-white/10 text-white" : "text-neutral-400 hover:text-white hover:bg-white/5"}`}
                 >
                   Rede
                 </button>
                 <button 
                   onClick={() => setActiveTab("workouts")}
-                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${activeTab === "workouts" ? "bg-neutral-100 dark:bg-white/10 text-neutral-900 dark:text-white" : "text-neutral-500 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-white/5"}`}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${activeTab === "workouts" ? "bg-white/10 text-white" : "text-neutral-400 hover:text-white hover:bg-white/5"}`}
                 >
                   Treinos
                 </button>
@@ -2913,13 +2863,13 @@ function Dashboard() {
                   <>
                     <button 
                       onClick={() => setActiveTab("assessments")}
-                      className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${activeTab === "assessments" ? "bg-neutral-100 dark:bg-white/10 text-neutral-900 dark:text-white" : "text-neutral-500 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-white/5"}`}
+                      className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${activeTab === "assessments" ? "bg-white/10 text-white" : "text-neutral-400 hover:text-white hover:bg-white/5"}`}
                     >
                       Avaliações
                     </button>
                     <button 
                       onClick={() => setActiveTab("subscriptions")}
-                      className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${activeTab === "subscriptions" ? "bg-neutral-100 dark:bg-white/10 text-neutral-900 dark:text-white" : "text-neutral-500 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-white/5"}`}
+                      className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${activeTab === "subscriptions" ? "bg-white/10 text-white" : "text-neutral-400 hover:text-white hover:bg-white/5"}`}
                     >
                       Assinaturas
                     </button>
@@ -2929,16 +2879,9 @@ function Dashboard() {
             </div>
 
             <div className="flex items-center gap-4">
-              <button
-                onClick={toggleTheme}
-                className="p-2 text-neutral-500 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-white/5 rounded-full transition-colors"
-                title={theme === "dark" ? "Modo Claro" : "Modo Escuro"}
-              >
-                {theme === "dark" ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
-              </button>
               <button 
                 onClick={() => setActiveTab("profile")}
-                className="flex items-center gap-3 hover:bg-neutral-100 dark:hover:bg-white/5 p-1 pr-3 rounded-full transition-colors"
+                className="flex items-center gap-3 hover:bg-white/5 p-1 pr-3 rounded-full transition-colors"
               >
                 {user.photoUrl ? (
                   <img src={user.photoUrl} alt="Profile" className="w-8 h-8 rounded-full object-cover border border-orange-500/50" />
@@ -2948,13 +2891,13 @@ function Dashboard() {
                   </div>
                 )}
                 <div className="text-sm text-left hidden md:block">
-                  <div className="font-medium text-neutral-900 dark:text-white">{user.displayName || user.name}</div>
+                  <div className="font-medium text-white">{user.displayName || user.name}</div>
                   <div className="text-neutral-500 capitalize text-xs">{user.role}</div>
                 </div>
               </button>
               <button
                 onClick={logout}
-                className="p-2 text-neutral-500 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-white/5 rounded-full transition-colors ml-2"
+                className="p-2 text-neutral-400 hover:text-white hover:bg-white/5 rounded-full transition-colors ml-2"
                 title="Sair"
               >
                 <LogOut className="w-5 h-5" />
@@ -2964,18 +2907,12 @@ function Dashboard() {
         </div>
       </nav>
 
-      <div className="sm:hidden bg-white dark:bg-neutral-900 border-b border-neutral-200 dark:border-white/10 sticky top-0 z-10 px-4 h-16 flex items-center justify-between">
+      <div className="sm:hidden bg-neutral-900 border-b border-white/10 sticky top-0 z-10 px-4 h-16 flex items-center justify-between">
         <button onClick={() => setActiveTab("home")} className="flex items-center gap-2 hover:opacity-80 transition-opacity">
           <img src="https://i.imgur.com/fxOHjtK.png" alt="Track & Health Logo" className="w-8 h-8 object-contain" referrerPolicy="no-referrer" />
-          <span className="font-bold text-xl tracking-tight text-neutral-900 dark:text-white">Track & Health</span>
+          <span className="font-bold text-xl tracking-tight text-white">Track & Health</span>
         </button>
         <div className="flex items-center gap-3">
-          <button
-            onClick={toggleTheme}
-            className="p-2 text-neutral-500 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-white/5 rounded-full transition-colors"
-          >
-            {theme === "dark" ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
-          </button>
           {user.photoUrl ? (
             <img src={user.photoUrl} alt="Profile" className="w-8 h-8 rounded-full object-cover border border-orange-500/50" />
           ) : (
@@ -2985,7 +2922,7 @@ function Dashboard() {
           )}
           <button
             onClick={logout}
-            className="p-2 text-neutral-500 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-white/5 rounded-full transition-colors"
+            className="p-2 text-neutral-400 hover:text-white hover:bg-white/5 rounded-full transition-colors"
           >
             <LogOut className="w-5 h-5" />
           </button>
@@ -3140,36 +3077,36 @@ function SubscriptionsView({ onBack }: { onBack: () => void }) {
       <div className="flex items-center gap-4">
         <button 
           onClick={onBack}
-          className="p-2 text-neutral-500 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-white/5 rounded-full transition-colors"
+          className="p-2 text-neutral-400 hover:text-white hover:bg-white/5 rounded-full transition-colors"
         >
           <ArrowLeft className="w-6 h-6" />
         </button>
         <div>
-          <h2 className="text-3xl font-black text-neutral-900 dark:text-white tracking-tight">Assinaturas e Pagamentos</h2>
+          <h2 className="text-3xl font-black text-white tracking-tight">Assinaturas e Pagamentos</h2>
           <p className="text-neutral-500 text-sm">Gerencie seu plano e formas de pagamento.</p>
         </div>
       </div>
 
       <div className="grid gap-6">
-        <div className="bg-white dark:bg-neutral-900 p-8 rounded-2xl border border-neutral-200 dark:border-white/10 shadow-2xl">
+        <div className="bg-neutral-900 p-8 rounded-2xl border border-white/10 shadow-2xl">
           <div className="flex items-center justify-between mb-6">
             <div>
-              <h3 className="text-xl font-bold text-neutral-900 dark:text-white">Plano Premium</h3>
+              <h3 className="text-xl font-bold text-white">Plano Premium</h3>
               <p className="text-neutral-500 text-sm">Acesso total a treinos e avaliações.</p>
             </div>
-            <span className="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 px-4 py-1 rounded-full text-xs font-bold border border-emerald-500/20">
+            <span className="bg-emerald-500/10 text-emerald-400 px-4 py-1 rounded-full text-xs font-bold border border-emerald-500/20">
               Ativo
             </span>
           </div>
           
           <div className="space-y-4">
-            <div className="flex items-center justify-between py-3 border-b border-neutral-100 dark:border-white/5">
-              <span className="text-neutral-500 dark:text-neutral-400">Próximo pagamento</span>
-              <span className="text-neutral-900 dark:text-white font-medium">15 de Abril, 2026</span>
+            <div className="flex items-center justify-between py-3 border-b border-white/5">
+              <span className="text-neutral-400">Próximo pagamento</span>
+              <span className="text-white font-medium">15 de Abril, 2026</span>
             </div>
-            <div className="flex items-center justify-between py-3 border-b border-neutral-100 dark:border-white/5">
-              <span className="text-neutral-500 dark:text-neutral-400">Valor</span>
-              <span className="text-neutral-900 dark:text-white font-medium">R$ 89,90/mês</span>
+            <div className="flex items-center justify-between py-3 border-b border-white/5">
+              <span className="text-neutral-400">Valor</span>
+              <span className="text-white font-medium">R$ 89,90/mês</span>
             </div>
           </div>
 
@@ -3178,47 +3115,47 @@ function SubscriptionsView({ onBack }: { onBack: () => void }) {
           </button>
         </div>
 
-        <div className="bg-white dark:bg-neutral-900 p-8 rounded-2xl border border-neutral-200 dark:border-white/10 shadow-2xl">
-          <h3 className="text-xl font-bold text-neutral-900 dark:text-white mb-6">Formas de Pagamento</h3>
+        <div className="bg-neutral-900 p-8 rounded-2xl border border-white/10 shadow-2xl">
+          <h3 className="text-xl font-bold text-white mb-6">Formas de Pagamento</h3>
           
           <div className="space-y-4">
-            <div className="flex items-center justify-between p-4 bg-neutral-50 dark:bg-white/5 rounded-xl border border-neutral-200 dark:border-white/10">
+            <div className="flex items-center justify-between p-4 bg-white/5 rounded-xl border border-white/10">
               <div className="flex items-center gap-4">
-                <div className="w-12 h-8 bg-neutral-200 dark:bg-neutral-800 rounded flex items-center justify-center border border-neutral-300 dark:border-white/10">
-                  <span className="text-[10px] font-bold text-neutral-700 dark:text-white">VISA</span>
+                <div className="w-12 h-8 bg-neutral-800 rounded flex items-center justify-center border border-white/10">
+                  <span className="text-[10px] font-bold text-white">VISA</span>
                 </div>
                 <div>
-                  <p className="text-neutral-900 dark:text-white font-medium">•••• •••• •••• 4242</p>
+                  <p className="text-white font-medium">•••• •••• •••• 4242</p>
                   <p className="text-neutral-500 text-xs">Expira em 12/28</p>
                 </div>
               </div>
-              <span className="text-xs font-bold text-orange-600 dark:text-orange-500">Principal</span>
+              <span className="text-xs font-bold text-orange-500">Principal</span>
             </div>
 
-            <button className="w-full flex items-center justify-center gap-2 p-4 border border-dashed border-neutral-300 dark:border-white/20 rounded-xl text-neutral-500 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white hover:border-neutral-400 dark:hover:border-white/40 transition-all">
+            <button className="w-full flex items-center justify-center gap-2 p-4 border border-dashed border-white/20 rounded-xl text-neutral-400 hover:text-white hover:border-white/40 transition-all">
               <Plus className="w-5 h-5" />
               <span className="font-bold text-sm">Adicionar Cartão</span>
             </button>
           </div>
         </div>
 
-        <div className="bg-white dark:bg-neutral-900 p-8 rounded-2xl border border-neutral-200 dark:border-white/10 shadow-2xl">
-          <h3 className="text-xl font-bold text-neutral-900 dark:text-white mb-6">Histórico de Faturas</h3>
+        <div className="bg-neutral-900 p-8 rounded-2xl border border-white/10 shadow-2xl">
+          <h3 className="text-xl font-bold text-white mb-6">Histórico de Faturas</h3>
           <div className="space-y-2">
             {[1, 2, 3].map((i) => (
-              <div key={i} className="flex items-center justify-between p-4 hover:bg-neutral-50 dark:hover:bg-white/5 rounded-xl transition-colors group">
+              <div key={i} className="flex items-center justify-between p-4 hover:bg-white/5 rounded-xl transition-colors group">
                 <div className="flex items-center gap-4">
-                  <div className="w-10 h-10 bg-neutral-100 dark:bg-neutral-800 rounded-lg flex items-center justify-center">
-                    <FileText className="w-5 h-5 text-neutral-500 group-hover:text-orange-600 dark:group-hover:text-orange-500 transition-colors" />
+                  <div className="w-10 h-10 bg-neutral-800 rounded-lg flex items-center justify-center">
+                    <FileText className="w-5 h-5 text-neutral-500 group-hover:text-orange-500 transition-colors" />
                   </div>
                   <div>
-                    <p className="text-neutral-900 dark:text-white font-medium">Fatura #00{i}</p>
+                    <p className="text-white font-medium">Fatura #00{i}</p>
                     <p className="text-neutral-500 text-xs">Pago em 15/{i+1}/2026</p>
                   </div>
                 </div>
                 <div className="text-right">
-                  <p className="text-neutral-900 dark:text-white font-bold">R$ 89,90</p>
-                  <button className="text-orange-600 dark:text-orange-500 text-xs font-bold hover:underline">Download PDF</button>
+                  <p className="text-white font-bold">R$ 89,90</p>
+                  <button className="text-orange-500 text-xs font-bold hover:underline">Download PDF</button>
                 </div>
               </div>
             ))}
@@ -3231,17 +3168,15 @@ function SubscriptionsView({ onBack }: { onBack: () => void }) {
 
 export default function App() {
   return (
-    <ThemeProvider>
-      <BrowserRouter>
-        <AuthProvider>
-          <Routes>
-            <Route path="/login" element={<Login />} />
-            <Route path="/dashboard" element={<Navigate to="/" replace />} />
-            <Route path="/" element={<Dashboard />} />
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
-        </AuthProvider>
-      </BrowserRouter>
-    </ThemeProvider>
+    <BrowserRouter>
+      <AuthProvider>
+        <Routes>
+          <Route path="/login" element={<Login />} />
+          <Route path="/dashboard" element={<Navigate to="/" replace />} />
+          <Route path="/" element={<Dashboard />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </AuthProvider>
+    </BrowserRouter>
   );
 }
