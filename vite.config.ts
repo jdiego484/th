@@ -16,7 +16,7 @@ export default defineConfig(({mode}) => {
         manifest: {
           name: 'Track & Health',
           short_name: 'Track & Health',
-          description: 'Track & Health - O seu personal 24 horas',
+          description: 'Track & Health - Monitoramento em Saúde',
           theme_color: '#171717',
           background_color: '#171717',
           display: 'standalone',
