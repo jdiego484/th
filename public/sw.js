@@ -1,8 +1,7 @@
-const CACHE_NAME = 'track-health-v2';
+const CACHE_NAME = 'track-health-v3';
 const ASSETS_TO_CACHE = [
   '/',
   '/index.html',
-  '/icon.svg',
   '/manifest.json'
 ];
 

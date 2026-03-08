@@ -1,4 +1,4 @@
-import { useState, useEffect, createContext, useContext, ReactNode, FormEvent, ChangeEvent } from "react";
+import { useState, useEffect, useRef, createContext, useContext, ReactNode, FormEvent, ChangeEvent } from "react";
 import { BrowserRouter, Routes, Route, Navigate, useNavigate } from "react-router-dom";
 import { User, LogOut, Users, Dumbbell, Activity, Search, Plus, ArrowLeft, Clock, Play, Check, Trash2, ChevronLeft, ChevronRight, Calendar as CalendarIcon, AlertTriangle, Image as ImageIcon, Video, Upload, X, Copy, Edit2, MessageSquare, CheckCircle2, Circle, GripVertical, Send } from "lucide-react";
 import { DragDropContext, Droppable, Draggable, DropResult } from "@hello-pangea/dnd";
@@ -1241,6 +1241,15 @@ function ChatModal({
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [newMessage, setNewMessage] = useState("");
   const [loading, setLoading] = useState(true);
+  const [newMessageReceived, setNewMessageReceived] = useState(false);
+  const isInitialLoad = useRef(true);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [messages]);
 
   useEffect(() => {
     const q = query(
@@ -1253,12 +1262,32 @@ function ChatModal({
         id: doc.id,
         ...doc.data()
       })) as ChatMessage[];
+      
+      // Use docChanges to detect NEW messages specifically
+      if (!isInitialLoad.current) {
+        const hasNewIncoming = snapshot.docChanges().some(change => 
+          change.type === "added" && (change.doc.data() as any).senderId !== user?.id
+        );
+
+        if (hasNewIncoming) {
+          // Sound signal
+          const audio = new Audio('https://cdn.pixabay.com/audio/2022/03/10/audio_c35078174a.mp3');
+          audio.volume = 0.5;
+          audio.play().catch(e => console.log("Audio play blocked by browser policy", e));
+          
+          // Visual signal
+          setNewMessageReceived(true);
+          setTimeout(() => setNewMessageReceived(false), 2000);
+        }
+      }
+      
       setMessages(msgs);
       setLoading(false);
+      isInitialLoad.current = false;
     });
 
     return () => unsubscribe();
-  }, [roomId]);
+  }, [roomId, user?.id]);
 
   const sendMessage = async (e: FormEvent) => {
     e.preventDefault();
@@ -1300,16 +1329,16 @@ function ChatModal({
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
       <div className="bg-neutral-900 w-full max-w-lg h-[600px] max-h-[90vh] rounded-3xl border border-white/10 shadow-2xl flex flex-col overflow-hidden">
         {/* Header */}
-        <div className="p-4 border-b border-white/10 flex items-center justify-between bg-neutral-950">
+        <div className={`p-4 border-b border-white/10 flex items-center justify-between bg-neutral-950 transition-all duration-500 ${newMessageReceived ? 'bg-orange-600/30' : ''}`}>
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-orange-600/20 rounded-full flex items-center justify-center text-orange-500 font-bold">
+            <div className={`w-10 h-10 bg-orange-600/20 rounded-full flex items-center justify-center text-orange-500 font-bold transition-transform duration-300 ${newMessageReceived ? 'scale-110' : ''}`}>
               {recipientName.charAt(0).toUpperCase()}
             </div>
             <div>
               <h3 className="text-white font-bold">{recipientName}</h3>
               <p className="text-[10px] text-emerald-500 flex items-center gap-1">
-                <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse"></span>
-                Chat Temporário Ativo
+                <span className={`w-1.5 h-1.5 bg-emerald-500 rounded-full ${newMessageReceived ? 'animate-ping' : 'animate-pulse'}`}></span>
+                {newMessageReceived ? 'Nova mensagem!' : 'Chat Temporário Ativo'}
               </p>
             </div>
           </div>
@@ -1328,7 +1357,7 @@ function ChatModal({
         </div>
 
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-neutral-900/50">
+        <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4 bg-neutral-900/50 scroll-smooth">
           {loading ? (
             <div className="flex items-center justify-center h-full">
               <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-orange-500"></div>
