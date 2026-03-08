@@ -2041,7 +2041,56 @@ function ClientWorkoutView({ workout, onBack, isPersonal: isPersonalProp }: { wo
   );
 }
 
-function ClientDashboard() {
+function ClientWorkoutsList({ workouts, onSelectWorkout }: { workouts: any[], onSelectWorkout: (workout: any) => void }) {
+  return (
+    <div className="space-y-3">
+      {workouts.length === 0 ? (
+        <div className="bg-neutral-900 p-12 rounded-2xl border border-white/10 text-center">
+          <Activity className="w-12 h-12 text-neutral-700 mx-auto mb-4" />
+          <h3 className="text-xl font-medium text-white mb-2">Nenhum treino encontrado</h3>
+          <p className="text-neutral-500">Seu treinador ainda não atribuiu um treino para você.</p>
+        </div>
+      ) : (
+        workouts.map(workout => (
+          <div 
+            key={workout.id}
+            onClick={() => onSelectWorkout(workout)}
+            className="bg-neutral-900 p-6 rounded-2xl border border-white/10 hover:border-orange-600 cursor-pointer transition-all shadow-xl hover:shadow-orange-600/5 flex items-center justify-between group"
+          >
+            <div className="flex items-center gap-4">
+              <div className={`w-12 h-12 rounded-full flex items-center justify-center transition-colors ${
+                workout.status === 'completed' ? 'bg-emerald-500/10 text-emerald-500' : 'bg-orange-600/10 text-orange-500'
+              }`}>
+                <CalendarIcon className="w-6 h-6" />
+              </div>
+              <div>
+                <h4 className="font-bold text-white text-lg">Treino</h4>
+                <p className="text-sm text-neutral-500">{new Date(workout.date).toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' })}</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-4">
+              <div className="text-right hidden sm:block">
+                <p className="text-xs font-bold uppercase tracking-wider text-neutral-600 mb-1">Status</p>
+                <span className={`text-xs font-bold px-3 py-1 rounded-full border ${
+                  workout.status === 'completed' 
+                    ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' 
+                    : 'text-blue-400 bg-blue-500/10 border-blue-500/20'
+                }`}>
+                  {workout.status === 'completed' ? 'Concluído' : 'Disponível'}
+                </span>
+              </div>
+              <div className="w-10 h-10 rounded-xl bg-neutral-800 flex items-center justify-center group-hover:bg-orange-600 transition-colors">
+                <Play className="w-5 h-5 text-white" />
+              </div>
+            </div>
+          </div>
+        ))
+      )}
+    </div>
+  );
+}
+
+function ClientDashboard({ onViewAllWorkouts }: { onViewAllWorkouts: () => void }) {
   const { user } = useAuth();
   const [personals, setPersonals] = useState<any[]>([]);
   const [workouts, setWorkouts] = useState<any[]>([]);
@@ -2154,33 +2203,15 @@ function ClientDashboard() {
             </div>
           </div>
           
-          {workouts.length === 0 ? (
-            <p className="text-neutral-500 text-sm">Seu treinador ainda não atribuiu um treino.</p>
-          ) : (
-            <div className="space-y-3">
-              {workouts.map(workout => (
-                <div 
-                  key={workout.id}
-                  onClick={() => setSelectedWorkout(workout)}
-                  className="bg-neutral-800 p-4 rounded-xl border border-white/10 hover:border-orange-600 cursor-pointer transition-colors flex items-center justify-between"
-                >
-                  <div>
-                    <h4 className="font-medium text-white">Treino</h4>
-                    <p className="text-xs text-neutral-500">{new Date(workout.date).toLocaleDateString('pt-BR')}</p>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <span className={`text-xs font-medium px-2 py-1 rounded border ${
-                      workout.status === 'completed' 
-                        ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' 
-                        : 'text-blue-400 bg-blue-500/10 border-blue-500/20'
-                    }`}>
-                      {workout.status === 'completed' ? 'Concluído' : `${workout.exercises.length} exercícios`}
-                    </span>
-                    <Play className="w-4 h-4 text-neutral-500" />
-                  </div>
-                </div>
-              ))}
-            </div>
+          <ClientWorkoutsList workouts={workouts.slice(0, 3)} onSelectWorkout={setSelectedWorkout} />
+          
+          {workouts.length > 3 && (
+            <button 
+              onClick={onViewAllWorkouts}
+              className="w-full mt-4 py-2 text-orange-500 hover:text-orange-400 text-xs font-bold uppercase tracking-widest border border-orange-500/20 rounded-xl hover:bg-orange-500/5 transition-all"
+            >
+              Ver Todos os Treinos
+            </button>
           )}
         </div>
         <div className="bg-neutral-900 p-6 rounded-2xl border border-white/10 shadow-2xl">
@@ -2514,6 +2545,71 @@ function CompleteProfile({ isEditing = false }: { isEditing?: boolean }) {
   );
 }
 
+function ClientWorkoutsTab() {
+  const { user } = useAuth();
+  const [workouts, setWorkouts] = useState<any[]>([]);
+  const [selectedWorkout, setSelectedWorkout] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (user) {
+      fetchWorkouts();
+    }
+  }, [user]);
+
+  const fetchWorkouts = async () => {
+    if (!user) return;
+    setLoading(true);
+    try {
+      const q = query(collection(db, "workouts"), where("client_id", "==", user.id));
+      const querySnapshot = await getDocs(q);
+      const workoutsData = querySnapshot.docs.map(doc => ({ id: doc.id, ...(doc.data() as any) }));
+      workoutsData.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      setWorkouts(workoutsData);
+    } catch (error) {
+      console.error("Error fetching workouts:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (selectedWorkout) {
+    return (
+      <ClientWorkoutView 
+        workout={selectedWorkout} 
+        onBack={() => {
+          setSelectedWorkout(null);
+          fetchWorkouts();
+        }} 
+        isPersonal={false} 
+      />
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-3xl font-black text-white tracking-tight">Meus Treinos</h2>
+          <p className="text-neutral-500 text-sm">Acompanhe sua jornada e execute seus treinos.</p>
+        </div>
+        <div className="bg-orange-600/10 px-4 py-2 rounded-xl border border-orange-500/20">
+          <span className="text-orange-500 font-bold text-sm">{workouts.length} Treinos</span>
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="flex flex-col items-center justify-center py-20">
+          <div className="w-10 h-10 border-4 border-orange-500/20 border-t-orange-500 rounded-full animate-spin mb-4"></div>
+          <p className="text-neutral-500 text-sm animate-pulse">Buscando seus treinos...</p>
+        </div>
+      ) : (
+        <ClientWorkoutsList workouts={workouts} onSelectWorkout={setSelectedWorkout} />
+      )}
+    </div>
+  );
+}
+
 function Dashboard() {
   const { user, loading, logout } = useAuth();
   const [activeTab, setActiveTab] = useState("home");
@@ -2623,13 +2719,9 @@ function Dashboard() {
       </div>
 
       <main className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
-        {activeTab === "home" && (user.role === "personal" ? <PersonalDashboard /> : <ClientDashboard />)}
+        {activeTab === "home" && (user.role === "personal" ? <PersonalDashboard /> : <ClientDashboard onViewAllWorkouts={() => setActiveTab("workouts")} />)}
         {activeTab === "workouts" && (user.role === "client" ? (
-          <div className="bg-neutral-900 p-12 rounded-2xl border border-white/10 text-center">
-            <Activity className="w-12 h-12 text-neutral-600 mx-auto mb-4" />
-            <h3 className="text-xl font-medium text-white mb-2">Treinos</h3>
-            <p className="text-neutral-500">Acesse seus treinos pela tela inicial.</p>
-          </div>
+          <ClientWorkoutsTab />
         ) : (
           <div className="bg-neutral-900 p-12 rounded-2xl border border-white/10 text-center">
             <Activity className="w-12 h-12 text-neutral-600 mx-auto mb-4" />
