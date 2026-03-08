@@ -531,6 +531,7 @@ function WorkoutBuilder({ client, onBack, existingWorkout }: { client: any, onBa
   const [isUploading, setIsUploading] = useState(false);
   const [pastWorkouts, setPastWorkouts] = useState<any[]>([]);
   const [showCopyModal, setShowCopyModal] = useState(false);
+  const [error, setError] = useState("");
 
   useEffect(() => {
     fetchPastWorkouts();
@@ -572,7 +573,14 @@ function WorkoutBuilder({ client, onBack, existingWorkout }: { client: any, onBa
     const file = e.target.files?.[0];
     if (!file) return;
 
+    if (file.type === 'image/gif') {
+      setError("Imagens GIF não são permitidas devido ao limite de tamanho. Use JPG ou PNG.");
+      setTimeout(() => setError(""), 5000);
+      return;
+    }
+
     setIsUploading(true);
+    setError("");
     const reader = new FileReader();
     reader.onloadend = () => {
       setMedia({
@@ -860,7 +868,7 @@ function WorkoutBuilder({ client, onBack, existingWorkout }: { client: any, onBa
                 <div className="relative group">
                   <input
                     type="file"
-                    accept="image/*,video/*"
+                    accept="image/jpeg,image/png,video/*"
                     onChange={handleFileChange}
                     className="hidden"
                     id="media-upload"
@@ -891,6 +899,13 @@ function WorkoutBuilder({ client, onBack, existingWorkout }: { client: any, onBa
                   )}
                 </div>
               </div>
+
+              {error && (
+                <div className="md:col-span-7 bg-red-500/10 border border-red-500/20 text-red-500 text-xs p-3 rounded-xl flex items-center gap-2 animate-pulse">
+                  <AlertTriangle className="w-4 h-4 shrink-0" />
+                  {error}
+                </div>
+              )}
               
               <div className="md:col-span-1">
                 <button
@@ -931,10 +946,10 @@ function WorkoutBuilder({ client, onBack, existingWorkout }: { client: any, onBa
                                 {...provided.draggableProps}
                                 className={`p-4 flex items-center justify-between transition-colors ${snapshot.isDragging ? 'bg-neutral-800 shadow-2xl z-50' : 'hover:bg-white/5'}`}
                               >
-                                <div className="flex items-center gap-4">
+                                <div className="flex items-center gap-3 sm:gap-4 min-w-0 flex-1">
                                   <div 
                                     {...provided.dragHandleProps}
-                                    className="text-neutral-600 hover:text-neutral-400 cursor-grab active:cursor-grabbing p-1"
+                                    className="text-neutral-600 hover:text-neutral-400 cursor-grab active:cursor-grabbing p-1 shrink-0"
                                   >
                                     <GripVertical className="w-5 h-5" />
                                   </div>
@@ -952,18 +967,18 @@ function WorkoutBuilder({ client, onBack, existingWorkout }: { client: any, onBa
                                       )}
                                     </div>
                                   )}
-                                  <div>
-                                    <h4 className="font-medium text-white">{ex.name}</h4>
-                                    <div className="flex items-center gap-3 text-sm text-neutral-400 mt-1">
+                                  <div className="min-w-0 flex-1">
+                                    <h4 className="font-medium text-white truncate">{ex.name}</h4>
+                                    <div className="flex items-center gap-2 sm:gap-3 text-xs sm:text-sm text-neutral-400 mt-1 overflow-x-auto no-scrollbar">
                                       {ex.isCardio ? (
-                                        <span className="text-orange-400 italic">{ex.prescription || "Sem prescrição"}</span>
+                                        <span className="text-orange-400 italic whitespace-nowrap">{ex.prescription || "Sem prescrição"}</span>
                                       ) : (
                                         <>
-                                          <span>{ex.sets} séries</span>
-                                          <span className="w-1 h-1 bg-neutral-600 rounded-full"></span>
-                                          <span>{ex.reps} reps</span>
-                                          <span className="w-1 h-1 bg-neutral-600 rounded-full"></span>
-                                          <span className="flex items-center gap-1 text-blue-400"><Clock className="w-3 h-3" /> {ex.rest}s descanso</span>
+                                          <span className="whitespace-nowrap">{ex.sets} séries</span>
+                                          <span className="w-1 h-1 bg-neutral-600 rounded-full shrink-0"></span>
+                                          <span className="whitespace-nowrap">{ex.reps} reps</span>
+                                          <span className="w-1 h-1 bg-neutral-600 rounded-full shrink-0"></span>
+                                          <span className="flex items-center gap-1 text-blue-400 whitespace-nowrap"><Clock className="w-3 h-3" /> {ex.rest}s</span>
                                         </>
                                       )}
                                     </div>
@@ -971,9 +986,9 @@ function WorkoutBuilder({ client, onBack, existingWorkout }: { client: any, onBa
                                 </div>
                                 <button 
                                   onClick={() => removeExercise(ex.id)}
-                                  className="p-2 text-neutral-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
+                                  className="p-2 text-neutral-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors shrink-0 ml-2"
                                 >
-                                  <Trash2 className="w-4 h-4" />
+                                  <Trash2 className="w-5 h-5 sm:w-4 sm:h-4" />
                                 </button>
                               </div>
                             )}
@@ -2287,6 +2302,10 @@ function CompleteProfile({ isEditing = false }: { isEditing?: boolean }) {
   const handlePhotoUpload = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      if (file.type === 'image/gif') {
+        setError("Imagens GIF não são permitidas para a foto de perfil. Use JPG ou PNG.");
+        return;
+      }
       const reader = new FileReader();
       reader.onloadend = () => {
         setPhotoUrl(reader.result as string);
@@ -2355,7 +2374,7 @@ function CompleteProfile({ isEditing = false }: { isEditing?: boolean }) {
               )}
               <label className="absolute bottom-0 right-0 bg-orange-600 p-2 rounded-full cursor-pointer hover:bg-orange-500 transition-colors shadow-lg">
                 <Plus className="w-4 h-4 text-white" />
-                <input type="file" accept="image/*" className="hidden" onChange={handlePhotoUpload} />
+                <input type="file" accept="image/jpeg,image/png" className="hidden" onChange={handlePhotoUpload} />
               </label>
             </div>
             <p className="text-sm text-neutral-400">Foto de Perfil</p>
