@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, createContext, useContext, ReactNode, FormEvent, ChangeEvent } from "react";
 import { BrowserRouter, Routes, Route, Navigate, useNavigate } from "react-router-dom";
-import { User, LogOut, Users, Dumbbell, Activity, Search, Plus, ArrowLeft, Clock, Play, Check, Trash2, ChevronLeft, ChevronRight, Calendar as CalendarIcon, AlertTriangle, Image as ImageIcon, Video, Upload, X, Copy, Edit2, MessageSquare, CheckCircle2, Circle, GripVertical, Send, CreditCard, FileText } from "lucide-react";
+import { User, LogOut, Users, Dumbbell, Activity, Search, Plus, ArrowLeft, Clock, Play, Check, Trash2, ChevronLeft, ChevronRight, Calendar as CalendarIcon, AlertTriangle, Image as ImageIcon, Video, Upload, X, Copy, Edit2, MessageSquare, CheckCircle2, Circle, GripVertical, Send, CreditCard, FileText, History, RefreshCw } from "lucide-react";
 import { DragDropContext, Droppable, Draggable, DropResult } from "@hello-pangea/dnd";
 import { auth, db } from "./firebase";
 import { EXERCISES } from "./data/exercises";
@@ -35,7 +35,7 @@ type UserType = {
   id: string;
   name: string;
   email: string;
-  role: "personal" | "client";
+  role: "personal" | "client" | "superadmin";
   personalCode?: string;
   profileCompleted?: boolean;
   displayName?: string;
@@ -136,7 +136,7 @@ function Login() {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [name, setName] = useState("");
-  const [role, setRole] = useState<"personal" | "client">("client");
+  const [role, setRole] = useState<"personal" | "client" | "superadmin">("client");
   const [personalCode, setPersonalCode] = useState("");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -438,7 +438,7 @@ function Login() {
   );
 }
 
-function CustomCalendar({ selectedDate, onSelectDate }: { selectedDate: string, onSelectDate: (date: string) => void }) {
+function CustomCalendar({ selectedDate, onSelectDate, workoutDates = [] }: { selectedDate: string, onSelectDate: (date: string) => void, workoutDates?: string[] }) {
   const [currentMonth, setCurrentMonth] = useState(new Date(selectedDate + "T12:00:00Z"));
 
   const daysInMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0).getDate();
@@ -465,17 +465,21 @@ function CustomCalendar({ selectedDate, onSelectDate }: { selectedDate: string, 
     const dateString = date.toISOString().split('T')[0];
     const isSelected = dateString === selectedDate;
     const isToday = dateString === new Date().toISOString().split('T')[0];
+    const hasWorkout = workoutDates.some(d => d.startsWith(dateString));
 
     days.push(
       <button
         key={i}
         onClick={() => onSelectDate(dateString)}
-        className={`h-10 w-10 rounded-full flex items-center justify-center text-sm font-medium transition-colors
+        className={`h-10 w-10 rounded-full flex flex-col items-center justify-center text-sm font-medium transition-colors relative
           ${isSelected ? 'bg-orange-600 text-white shadow-lg shadow-orange-600/30' : 
             isToday ? 'bg-white/10 text-emerald-400 border border-emerald-500/30' : 
             'text-neutral-400 hover:bg-white/10 hover:text-white'}`}
       >
         {i}
+        {hasWorkout && !isSelected && (
+          <div className="absolute bottom-1 w-1 h-1 bg-orange-500 rounded-full"></div>
+        )}
       </button>
     );
   }
@@ -2758,6 +2762,7 @@ function ClientWorkoutsTab() {
   const [selectedWorkout, setSelectedWorkout] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [isBlocked, setIsBlocked] = useState(false);
+  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
 
   useEffect(() => {
     if (user) {
@@ -2781,13 +2786,11 @@ function ClientWorkoutsTab() {
       const querySnapshot = await getDocs(q);
       let workoutsData = querySnapshot.docs.map(doc => ({ id: doc.id, ...(doc.data() as any) }));
       
-      // Filter out workouts from personals who blocked the client
       const connectionsQ = query(collection(db, "connections"), where("client_id", "==", user.id), where("status", "==", "blocked"));
       const connectionsSnapshot = await getDocs(connectionsQ);
       const blockedPersonalIds = connectionsSnapshot.docs.map(doc => doc.data().personal_id);
       
       workoutsData = workoutsData.filter(w => !blockedPersonalIds.includes(w.personal_id));
-
       workoutsData.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
       setWorkouts(workoutsData);
     } catch (error) {
@@ -2796,6 +2799,15 @@ function ClientWorkoutsTab() {
       setLoading(false);
     }
   };
+
+  const todayStr = new Date().toISOString().split('T')[0];
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const tomorrowStr = tomorrow.toISOString().split('T')[0];
+
+  const todayWorkout = workouts.find(w => w.date.startsWith(todayStr));
+  const tomorrowWorkout = workouts.find(w => w.date.startsWith(tomorrowStr));
+  const selectedDateWorkout = workouts.find(w => w.date.startsWith(selectedDate));
 
   if (selectedWorkout) {
     return (
@@ -2817,9 +2829,6 @@ function ClientWorkoutsTab() {
           <h2 className="text-3xl font-black text-white tracking-tight">Meus Treinos</h2>
           <p className="text-neutral-500 text-sm">Acompanhe sua jornada e execute seus treinos.</p>
         </div>
-        <div className="bg-orange-600/10 px-4 py-2 rounded-xl border border-orange-500/20">
-          <span className="text-orange-500 font-bold text-sm">{workouts.length} Treinos</span>
-        </div>
       </div>
 
       {isBlocked && (
@@ -2840,8 +2849,384 @@ function ClientWorkoutsTab() {
           <p className="text-neutral-500 text-sm animate-pulse">Buscando seus treinos...</p>
         </div>
       ) : (
-        <ClientWorkoutsList workouts={workouts} onSelectWorkout={setSelectedWorkout} />
+        <div className="space-y-8">
+          {/* Today's Workout */}
+          <section>
+            <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
+              <div className="w-1 h-6 bg-orange-500 rounded-full"></div>
+              Treino de Hoje
+            </h3>
+            {todayWorkout ? (
+              <ClientWorkoutsList workouts={[todayWorkout]} onSelectWorkout={setSelectedWorkout} />
+            ) : (
+              <div className="bg-neutral-900/50 p-8 rounded-2xl border border-dashed border-white/10 text-center">
+                <p className="text-neutral-500 text-sm">Nenhum treino agendado para hoje.</p>
+              </div>
+            )}
+          </section>
+
+          {/* Tomorrow's Workout */}
+          <section>
+            <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
+              <div className="w-1 h-6 bg-neutral-700 rounded-full"></div>
+              Treino de Amanhã
+            </h3>
+            {tomorrowWorkout ? (
+              <ClientWorkoutsList workouts={[tomorrowWorkout]} onSelectWorkout={setSelectedWorkout} />
+            ) : (
+              <div className="bg-neutral-900/50 p-8 rounded-2xl border border-dashed border-white/10 text-center">
+                <p className="text-neutral-500 text-sm">Nenhum treino agendado para amanhã.</p>
+              </div>
+            )}
+          </section>
+
+          {/* Calendar and Selection */}
+          <section className="space-y-6">
+            <h3 className="text-lg font-bold text-white flex items-center gap-2">
+              <CalendarIcon className="w-5 h-5 text-orange-500" />
+              Explorar Calendário
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <CustomCalendar 
+                selectedDate={selectedDate} 
+                onSelectDate={setSelectedDate} 
+                workoutDates={workouts.map(w => w.date)}
+              />
+              <div className="space-y-4">
+                <h4 className="text-sm font-bold text-neutral-500 uppercase tracking-wider">
+                  {selectedDate === todayStr ? "Selecionado: Hoje" : 
+                   selectedDate === tomorrowStr ? "Selecionado: Amanhã" : 
+                   `Selecionado: ${new Date(selectedDate + "T12:00:00Z").toLocaleDateString('pt-BR')}`}
+                </h4>
+                {selectedDateWorkout ? (
+                  <ClientWorkoutsList workouts={[selectedDateWorkout]} onSelectWorkout={setSelectedWorkout} />
+                ) : (
+                  <div className="bg-neutral-900/50 p-12 rounded-2xl border border-white/5 text-center flex flex-col items-center justify-center h-full min-h-[200px]">
+                    <Activity className="w-10 h-10 text-neutral-800 mb-3" />
+                    <p className="text-neutral-600 text-sm">Nenhum treino para esta data.</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </section>
+        </div>
       )}
+    </div>
+  );
+}
+
+function ClientHistoryTab() {
+  const { user } = useAuth();
+  const [workouts, setWorkouts] = useState<any[]>([]);
+  const [selectedWorkout, setSelectedWorkout] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+
+  useEffect(() => {
+    if (user) {
+      fetchWorkouts();
+    }
+  }, [user]);
+
+  const fetchWorkouts = async () => {
+    if (!user) return;
+    setLoading(true);
+    try {
+      const q = query(collection(db, "workouts"), where("client_id", "==", user.id));
+      const querySnapshot = await getDocs(q);
+      let workoutsData = querySnapshot.docs.map(doc => ({ id: doc.id, ...(doc.data() as any) }));
+      
+      // Filter out workouts from personals who blocked the client
+      const connectionsQ = query(collection(db, "connections"), where("client_id", "==", user.id), where("status", "==", "blocked"));
+      const connectionsSnapshot = await getDocs(connectionsQ);
+      const blockedPersonalIds = connectionsSnapshot.docs.map(doc => doc.data().personal_id);
+      
+      workoutsData = workoutsData.filter(w => !blockedPersonalIds.includes(w.personal_id));
+      workoutsData.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      setWorkouts(workoutsData);
+    } catch (error) {
+      console.error("Error fetching workouts:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const todayStr = new Date().toISOString().split('T')[0];
+  const historyWorkouts = workouts.filter(w => w.date <= todayStr);
+  const last5Workouts = historyWorkouts.slice(0, 5);
+  const selectedDateWorkout = workouts.find(w => w.date.startsWith(selectedDate));
+
+  if (selectedWorkout) {
+    return (
+      <ClientWorkoutView 
+        workout={selectedWorkout} 
+        onBack={() => {
+          setSelectedWorkout(null);
+          fetchWorkouts();
+        }} 
+        isPersonal={false} 
+      />
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-3xl font-black text-white tracking-tight">Histórico de Treinos</h2>
+          <p className="text-neutral-500 text-sm">Reveja seus treinos passados e acompanhe sua evolução.</p>
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="flex flex-col items-center justify-center py-20">
+          <div className="w-10 h-10 border-4 border-orange-500/20 border-t-orange-500 rounded-full animate-spin mb-4"></div>
+          <p className="text-neutral-500 text-sm animate-pulse">Buscando histórico...</p>
+        </div>
+      ) : (
+        <div className="space-y-8">
+          {/* Calendar for history */}
+          <section className="space-y-6">
+            <h3 className="text-lg font-bold text-white flex items-center gap-2">
+              <CalendarIcon className="w-5 h-5 text-orange-500" />
+              Buscar no Calendário
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <CustomCalendar 
+                selectedDate={selectedDate} 
+                onSelectDate={setSelectedDate} 
+                workoutDates={workouts.map(w => w.date)}
+              />
+              <div className="space-y-4">
+                <h4 className="text-sm font-bold text-neutral-500 uppercase tracking-wider">
+                  {`Data: ${new Date(selectedDate + "T12:00:00Z").toLocaleDateString('pt-BR')}`}
+                </h4>
+                {selectedDateWorkout ? (
+                  <ClientWorkoutsList workouts={[selectedDateWorkout]} onSelectWorkout={setSelectedWorkout} />
+                ) : (
+                  <div className="bg-neutral-900/50 p-12 rounded-2xl border border-white/5 text-center flex flex-col items-center justify-center h-full min-h-[200px]">
+                    <Activity className="w-10 h-10 text-neutral-800 mb-3" />
+                    <p className="text-neutral-600 text-sm">Nenhum treino encontrado nesta data.</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </section>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+function SuperAdminDashboard() {
+  const [users, setUsers] = useState<UserType[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [filterRole, setFilterRole] = useState<"all" | "personal" | "client" | "superadmin">("all");
+
+  useEffect(() => {
+    fetchUsers();
+  }, []);
+
+  const fetchUsers = async () => {
+    setLoading(true);
+    try {
+      const q = query(collection(db, "users"));
+      const snapshot = await getDocs(q);
+      const usersData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as UserType));
+      setUsers(usersData);
+    } catch (error) {
+      console.error("Error fetching users:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const updateUserRole = async (userId: string, newRole: "personal" | "client") => {
+    try {
+      await updateDoc(doc(db, "users", userId), { role: newRole });
+      setUsers(prev => prev.map(u => u.id === userId ? { ...u, role: newRole } : u));
+      alert("Role atualizada com sucesso!");
+    } catch (error) {
+      console.error("Error updating role:", error);
+      alert("Erro ao atualizar role.");
+    }
+  };
+
+  const filteredUsers = users.filter(u => {
+    const matchesSearch = u.name?.toLowerCase().includes(searchTerm.toLowerCase()) || 
+                         u.email?.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesRole = filterRole === "all" || u.role === filterRole;
+    return matchesSearch && matchesRole;
+  });
+
+  const personals = filteredUsers.filter(u => u.role === "personal");
+  const clients = filteredUsers.filter(u => u.role === "client");
+  const admins = filteredUsers.filter(u => u.role === "superadmin");
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-3xl font-black text-white tracking-tight">Painel SuperAdmin</h2>
+          <p className="text-neutral-500 text-sm">Gerencie todos os usuários e permissões do sistema.</p>
+        </div>
+        <button 
+          onClick={fetchUsers}
+          className="p-2 bg-neutral-900 hover:bg-neutral-800 rounded-xl border border-white/5 transition-colors"
+        >
+          <RefreshCw className={`w-5 h-5 text-orange-500 ${loading ? 'animate-spin' : ''}`} />
+        </button>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="bg-neutral-900 p-4 rounded-2xl border border-white/10">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-neutral-500" />
+            <input
+              type="text"
+              placeholder="Buscar por nome ou email..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full bg-neutral-800 border border-white/5 rounded-xl pl-10 pr-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-orange-500 transition-all"
+            />
+          </div>
+        </div>
+        <div className="bg-neutral-900 p-4 rounded-2xl border border-white/10 flex items-center gap-3">
+          <span className="text-xs font-bold text-neutral-500 uppercase tracking-widest whitespace-nowrap">Filtrar:</span>
+          <div className="flex bg-neutral-800 p-1 rounded-lg border border-white/5 w-full">
+            {(["all", "personal", "client", "superadmin"] as const).map((r) => (
+              <button
+                key={r}
+                onClick={() => setFilterRole(r)}
+                className={`flex-1 py-1.5 text-[10px] font-bold uppercase rounded-md transition-all ${
+                  filterRole === r ? "bg-orange-600 text-white shadow-lg" : "text-neutral-500 hover:text-white"
+                }`}
+              >
+                {r === "all" ? "Todos" : r === "client" ? "Alunos" : r}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="flex flex-col items-center justify-center py-20">
+          <div className="w-10 h-10 border-4 border-orange-500/20 border-t-orange-500 rounded-full animate-spin mb-4"></div>
+          <p className="text-neutral-500 text-sm animate-pulse">Carregando usuários...</p>
+        </div>
+      ) : (
+        <div className="space-y-8">
+          {/* Personals Section */}
+          {(filterRole === "all" || filterRole === "personal") && personals.length > 0 && (
+            <UserTable 
+              title="Personals" 
+              users={personals} 
+              onUpdateRole={updateUserRole} 
+              icon={<Users className="w-5 h-5 text-blue-400" />}
+            />
+          )}
+
+          {/* Clients Section */}
+          {(filterRole === "all" || filterRole === "client") && clients.length > 0 && (
+            <UserTable 
+              title="Alunos" 
+              users={clients} 
+              onUpdateRole={updateUserRole} 
+              icon={<Dumbbell className="w-5 h-5 text-emerald-400" />}
+            />
+          )}
+
+          {/* Admins Section */}
+          {(filterRole === "all" || filterRole === "superadmin") && admins.length > 0 && (
+            <UserTable 
+              title="Administradores" 
+              users={admins} 
+              onUpdateRole={null} 
+              icon={<Activity className="w-5 h-5 text-purple-400" />}
+            />
+          )}
+
+          {filteredUsers.length === 0 && (
+            <div className="bg-neutral-900 p-12 rounded-2xl border border-white/10 text-center">
+              <Search className="w-12 h-12 text-neutral-700 mx-auto mb-4" />
+              <p className="text-neutral-500">Nenhum usuário encontrado com os filtros atuais.</p>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function UserTable({ title, users, onUpdateRole, icon }: { title: string, users: UserType[], onUpdateRole: ((id: string, role: "personal" | "client") => void) | null, icon: ReactNode }) {
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-2 px-2">
+        {icon}
+        <h3 className="text-lg font-bold text-white">{title}</h3>
+        <span className="bg-white/5 text-neutral-500 text-[10px] px-2 py-0.5 rounded-full border border-white/5">
+          {users.length}
+        </span>
+      </div>
+      <div className="bg-neutral-900 rounded-2xl border border-white/10 overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-sm">
+            <thead className="bg-neutral-800 text-neutral-400 uppercase text-[10px] font-bold tracking-widest border-b border-white/5">
+              <tr>
+                <th className="px-6 py-4">Usuário</th>
+                <th className="px-6 py-4">Role Atual</th>
+                {onUpdateRole && <th className="px-6 py-4">Ações</th>}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-white/5">
+              {users.map(user => (
+                <tr key={user.id} className="hover:bg-white/5 transition-colors">
+                  <td className="px-6 py-4">
+                    <div className="flex items-center gap-3">
+                      {user.photoUrl ? (
+                        <img src={user.photoUrl} alt="" className="w-8 h-8 rounded-full object-cover" />
+                      ) : (
+                        <div className="w-8 h-8 bg-orange-500/10 rounded-full flex items-center justify-center text-orange-500 font-bold text-xs">
+                          {user.name?.charAt(0).toUpperCase()}
+                        </div>
+                      )}
+                      <div>
+                        <div className="font-bold text-white">{user.name}</div>
+                        <div className="text-neutral-500 text-xs">{user.email}</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td className="px-6 py-4">
+                    <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                      user.role === 'superadmin' ? 'bg-purple-500/10 text-purple-400 border border-purple-500/20' :
+                      user.role === 'personal' ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20' :
+                      'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                    }`}>
+                      {user.role === 'client' ? 'Aluno' : user.role}
+                    </span>
+                  </td>
+                  {onUpdateRole && (
+                    <td className="px-6 py-4">
+                      <div className="flex items-center gap-2">
+                        <select 
+                          value={user.role}
+                          onChange={(e) => onUpdateRole(user.id, e.target.value as any)}
+                          className="bg-neutral-800 border border-white/5 text-white text-xs rounded-lg p-1.5 focus:ring-orange-500 focus:border-orange-500"
+                        >
+                          <option value="client">Aluno</option>
+                          <option value="personal">Personal</option>
+                        </select>
+                      </div>
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   );
 }
@@ -2894,6 +3279,12 @@ function Dashboard() {
                 </button>
                 {user.role === "client" && (
                   <>
+                    <button 
+                      onClick={() => setActiveTab("history")}
+                      className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${activeTab === "history" ? "bg-white/10 text-white" : "text-neutral-400 hover:text-white hover:bg-white/5"}`}
+                    >
+                      Histórico
+                    </button>
                     <button 
                       onClick={() => setActiveTab("assessments")}
                       className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${activeTab === "assessments" ? "bg-white/10 text-white" : "text-neutral-400 hover:text-white hover:bg-white/5"}`}
@@ -2963,16 +3354,25 @@ function Dashboard() {
       </div>
 
       <main className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
-        {activeTab === "home" && (user.role === "personal" ? <PersonalDashboard /> : <ClientDashboard onViewAllWorkouts={() => setActiveTab("workouts")} onViewSubscriptions={() => setActiveTab("subscriptions")} />)}
+        {activeTab === "home" && (
+          user.role === "superadmin" ? <SuperAdminDashboard /> :
+          user.role === "personal" ? <PersonalDashboard /> : 
+          <ClientDashboard onViewAllWorkouts={() => setActiveTab("workouts")} onViewSubscriptions={() => setActiveTab("subscriptions")} />
+        )}
         {activeTab === "workouts" && (user.role === "client" ? (
           <ClientWorkoutsTab />
         ) : (
           <div className="bg-neutral-900 p-12 rounded-2xl border border-white/10 text-center">
             <Activity className="w-12 h-12 text-neutral-600 mx-auto mb-4" />
             <h3 className="text-xl font-medium text-white mb-2">Treinos</h3>
-            <p className="text-neutral-500">Selecione um aluno na tela inicial para montar treinos.</p>
+            <p className="text-neutral-500">
+              {user.role === "superadmin" ? "Acesse o painel de administração para gerenciar treinos." : "Selecione um aluno na tela inicial para montar treinos."}
+            </p>
           </div>
         ))}
+        {activeTab === "history" && user.role === "client" && (
+          <ClientHistoryTab />
+        )}
         {activeTab === "assessments" && user.role === "client" && (
           <AssessmentView 
             clientId={user.id} 
@@ -3082,6 +3482,15 @@ function Dashboard() {
             <Activity className="w-5 h-5" />
             <span className="text-[10px] font-medium">Treinos</span>
           </button>
+          {user.role === "client" && (
+            <button 
+              onClick={() => setActiveTab("history")}
+              className={`flex flex-col items-center justify-center w-full h-full space-y-1 ${activeTab === "history" ? "text-orange-500" : "text-neutral-500"}`}
+            >
+              <History className="w-5 h-5" />
+              <span className="text-[10px] font-medium">Histórico</span>
+            </button>
+          )}
           {user.role === "client" && (
             <button 
               onClick={() => setActiveTab("assessments")}
