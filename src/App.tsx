@@ -2192,6 +2192,14 @@ function ClientWorkoutView({ workout, onBack, isPersonal: isPersonalProp }: { wo
 }
 
 function ClientWorkoutsList({ workouts, onSelectWorkout }: { workouts: any[], onSelectWorkout: (workout: any) => void }) {
+  const isToday = (dateString: string) => {
+    const today = new Date();
+    const date = new Date(dateString);
+    return date.getDate() === today.getDate() &&
+      date.getMonth() === today.getMonth() &&
+      date.getFullYear() === today.getFullYear();
+  };
+
   return (
     <div className="space-y-3">
       {workouts.length === 0 ? (
@@ -2201,40 +2209,50 @@ function ClientWorkoutsList({ workouts, onSelectWorkout }: { workouts: any[], on
           <p className="text-neutral-500">Seu treinador ainda não atribuiu um treino para você.</p>
         </div>
       ) : (
-        workouts.map(workout => (
-          <div 
-            key={workout.id}
-            onClick={() => onSelectWorkout(workout)}
-            className="bg-neutral-900 p-6 rounded-2xl border border-white/10 hover:border-orange-600 cursor-pointer transition-all shadow-xl hover:shadow-orange-600/5 flex items-center justify-between group"
-          >
-            <div className="flex items-center gap-4">
-              <div className={`w-12 h-12 rounded-full flex items-center justify-center transition-colors ${
-                workout.status === 'completed' ? 'bg-emerald-500/10 text-emerald-500' : 'bg-orange-600/10 text-orange-500'
-              }`}>
-                <CalendarIcon className="w-6 h-6" />
-              </div>
-              <div>
-                <h4 className="font-bold text-white text-lg">Treino</h4>
-                <p className="text-sm text-neutral-500">{new Date(workout.date).toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' })}</p>
-              </div>
-            </div>
-            <div className="flex items-center gap-4">
-              <div className="text-right hidden sm:block">
-                <p className="text-xs font-bold uppercase tracking-wider text-neutral-600 mb-1">Status</p>
-                <span className={`text-xs font-bold px-3 py-1 rounded-full border ${
-                  workout.status === 'completed' 
-                    ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' 
-                    : 'text-blue-400 bg-blue-500/10 border-blue-500/20'
+        workouts.map(workout => {
+          const today = isToday(workout.date);
+          return (
+            <div 
+              key={workout.id}
+              onClick={() => onSelectWorkout(workout)}
+              className={`bg-neutral-900 p-6 rounded-2xl border ${today ? 'border-orange-500 ring-1 ring-orange-500/50' : 'border-white/10'} hover:border-orange-600 cursor-pointer transition-all shadow-xl hover:shadow-orange-600/5 flex items-center justify-between group relative overflow-hidden`}
+            >
+              {today && (
+                <div className="absolute top-0 right-0">
+                  <div className="bg-orange-500 text-white text-[10px] font-black uppercase px-3 py-1 rounded-bl-xl tracking-tighter shadow-lg">
+                    Treino de Hoje
+                  </div>
+                </div>
+              )}
+              <div className="flex items-center gap-4">
+                <div className={`w-12 h-12 rounded-full flex items-center justify-center transition-colors ${
+                  workout.status === 'completed' ? 'bg-emerald-500/10 text-emerald-500' : 'bg-orange-600/10 text-orange-500'
                 }`}>
-                  {workout.status === 'completed' ? 'Concluído' : 'Disponível'}
-                </span>
+                  <CalendarIcon className="w-6 h-6" />
+                </div>
+                <div>
+                  <h4 className="font-bold text-white text-lg">Treino</h4>
+                  <p className="text-sm text-neutral-500">{new Date(workout.date).toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' })}</p>
+                </div>
               </div>
-              <div className="w-10 h-10 rounded-xl bg-neutral-800 flex items-center justify-center group-hover:bg-orange-600 transition-colors">
-                <Play className="w-5 h-5 text-white group-hover:text-white" />
+              <div className="flex items-center gap-4">
+                <div className="text-right hidden sm:block">
+                  <p className="text-xs font-bold uppercase tracking-wider text-neutral-600 mb-1">Status</p>
+                  <span className={`text-xs font-bold px-3 py-1 rounded-full border ${
+                    workout.status === 'completed' 
+                      ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' 
+                      : 'text-blue-400 bg-blue-500/10 border-blue-500/20'
+                  }`}>
+                    {workout.status === 'completed' ? 'Concluído' : 'Disponível'}
+                  </span>
+                </div>
+                <div className="w-10 h-10 rounded-xl bg-neutral-800 flex items-center justify-center group-hover:bg-orange-600 transition-colors">
+                  <Play className="w-5 h-5 text-white group-hover:text-white" />
+                </div>
               </div>
             </div>
-          </div>
-        ))
+          );
+        })
       )}
     </div>
   );
@@ -2287,6 +2305,8 @@ function ClientDashboard({ onViewAllWorkouts, onViewSubscriptions }: { onViewAll
     setPersonals(personalsData);
   };
 
+  const isBlocked = personals.some(p => p.status === "blocked");
+
   if (selectedWorkout) {
     return (
       <ClientWorkoutView 
@@ -2302,19 +2322,21 @@ function ClientDashboard({ onViewAllWorkouts, onViewSubscriptions }: { onViewAll
 
   return (
     <div className="space-y-6">
-      <button 
-        onClick={onViewSubscriptions}
-        className="w-full text-left bg-gradient-to-r from-orange-600 to-orange-500 p-6 rounded-2xl shadow-2xl shadow-orange-600/20 flex items-center justify-between overflow-hidden relative group transition-transform hover:scale-[1.01] active:scale-[0.99]"
-      >
-        <div className="relative z-10">
-          <h2 className="text-xl font-black text-white uppercase tracking-tighter">verificar pendencias</h2>
-          <p className="text-orange-100 text-sm font-medium opacity-90">nao pare agora! Clique aqui e atualize a formas de pagamento.</p>
-        </div>
-        <div className="bg-white/20 p-3 rounded-xl backdrop-blur-md relative z-10">
-          <CreditCard className="w-6 h-6 text-white animate-pulse" />
-        </div>
-        <div className="absolute -right-4 -bottom-4 w-32 h-32 bg-white/10 rounded-full blur-3xl group-hover:scale-150 transition-transform duration-700"></div>
-      </button>
+      {isBlocked && (
+        <button 
+          onClick={onViewSubscriptions}
+          className="w-full text-left bg-gradient-to-r from-orange-600 to-orange-500 p-6 rounded-2xl shadow-2xl shadow-orange-600/20 flex items-center justify-between overflow-hidden relative group transition-transform hover:scale-[1.01] active:scale-[0.99]"
+        >
+          <div className="relative z-10">
+            <h2 className="text-xl font-black text-white uppercase tracking-tighter">Verificar pendências</h2>
+            <p className="text-orange-100 text-sm font-medium opacity-90">Não pare agora! Clique aqui e atualize as formas de pagamento.</p>
+          </div>
+          <div className="bg-white/20 p-3 rounded-xl backdrop-blur-md relative z-10">
+            <CreditCard className="w-6 h-6 text-white animate-pulse" />
+          </div>
+          <div className="absolute -right-4 -bottom-4 w-32 h-32 bg-white/10 rounded-full blur-3xl group-hover:scale-150 transition-transform duration-700"></div>
+        </button>
+      )}
 
       <h2 className="text-2xl font-bold text-white">Meus Treinadores</h2>
       
@@ -2735,12 +2757,21 @@ function ClientWorkoutsTab() {
   const [workouts, setWorkouts] = useState<any[]>([]);
   const [selectedWorkout, setSelectedWorkout] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [isBlocked, setIsBlocked] = useState(false);
 
   useEffect(() => {
     if (user) {
       fetchWorkouts();
+      checkBlockedStatus();
     }
   }, [user]);
+
+  const checkBlockedStatus = async () => {
+    if (!user) return;
+    const q = query(collection(db, "connections"), where("client_id", "==", user.id), where("status", "==", "blocked"));
+    const snapshot = await getDocs(q);
+    setIsBlocked(!snapshot.empty);
+  };
 
   const fetchWorkouts = async () => {
     if (!user) return;
@@ -2791,15 +2822,17 @@ function ClientWorkoutsTab() {
         </div>
       </div>
 
-      <div className="bg-neutral-900/50 p-4 rounded-xl border border-white/5 flex items-center gap-3">
-        <div className="w-10 h-10 bg-orange-600/20 rounded-full flex items-center justify-center shrink-0">
-          <Activity className="w-5 h-5 text-orange-500" />
+      {isBlocked && (
+        <div className="bg-neutral-900/50 p-4 rounded-xl border border-white/5 flex items-center gap-3">
+          <div className="w-10 h-10 bg-orange-600/20 rounded-full flex items-center justify-center shrink-0">
+            <Activity className="w-5 h-5 text-orange-500" />
+          </div>
+          <div>
+            <p className="text-white font-bold text-sm">Verificar pendências</p>
+            <p className="text-neutral-500 text-xs">Não pare agora! Mantenha seus pagamentos em dia para continuar treinando.</p>
+          </div>
         </div>
-        <div>
-          <p className="text-white font-bold text-sm">verificar pendencias</p>
-          <p className="text-neutral-500 text-xs">nao pare agora! Mantenha seus pagamentos em dia para continuar treinando.</p>
-        </div>
-      </div>
+      )}
 
       {loading ? (
         <div className="flex flex-col items-center justify-center py-20">
