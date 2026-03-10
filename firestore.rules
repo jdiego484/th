@@ -1,0 +1,85 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isAdmin() {
+      return isAuthenticated() && 
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'superadmin' ||
+         (request.auth.token.email == "jdiego484@gmail.com" && request.auth.token.email_verified == true));
+    }
+    
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    // Users Collection
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      allow create: if isOwner(userId) && hasRequiredFields(['name', 'email', 'role']);
+      allow update: if (isOwner(userId) && request.resource.data.role == resource.data.role) || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // Connections Collection
+    match /connections/{connectionId} {
+      allow read, update: if isAuthenticated() && (request.auth.uid == resource.data.personal_id || request.auth.uid == resource.data.client_id || isAdmin());
+      allow create: if isAuthenticated() && (request.auth.uid == request.resource.data.personal_id || isAdmin()) && hasRequiredFields(['personal_id', 'client_id', 'status']);
+      allow delete: if isAdmin();
+    }
+
+    // Workouts Collection
+    match /workouts/{workoutId} {
+      allow read: if isAuthenticated() && (request.auth.uid == resource.data.client_id || request.auth.uid == resource.data.personal_id || isAdmin());
+      allow create, update, delete: if isAuthenticated() && (request.auth.uid == request.resource.data.personal_id || isAdmin());
+    }
+
+    // Assessments Collection
+    match /assessments/{assessmentId} {
+      allow read: if isAuthenticated() && (request.auth.uid == resource.data.client_id || request.auth.uid == resource.data.personal_id || isAdmin());
+      allow create, update, delete: if isAuthenticated() && (request.auth.uid == request.resource.data.personal_id || isAdmin());
+    }
+
+    // Chats and Messages
+    match /chats/{roomId} {
+      allow read: if isAuthenticated() && (request.auth.uid in roomId.split('_') || isAdmin());
+      
+      match /messages/{messageId} {
+        allow read: if isAuthenticated() && (request.auth.uid in roomId.split('_') || isAdmin());
+        allow create: if isAuthenticated() && (request.auth.uid == request.resource.data.senderId) && (request.auth.uid in roomId.split('_') || isAdmin());
+        allow update, delete: if isAdmin();
+      }
+    }
+
+    // Invitations
+    match /invitations/{invitationId} {
+      allow read: if isAuthenticated() && (request.auth.uid == resource.data.personal_id || request.auth.token.email == resource.data.email || isAdmin());
+      allow create, delete: if isAuthenticated() && (request.auth.uid == request.resource.data.personal_id || isAdmin());
+    }
+
+    // System Messages
+    match /system_messages/{messageId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+  }
+}

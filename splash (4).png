@@ -1,0 +1,1 @@
+{"name":"FitConnect","short_name":"FitConnect","description":"A platform connecting personal trainers with their clients.","start_url":"/","display":"standalone","background_color":"#171717","theme_color":"#171717","lang":"en","scope":"/","icons":[{"src":"icon.svg","sizes":"192x192 512x512","type":"image/svg+xml","purpose":"any maskable"}]}
