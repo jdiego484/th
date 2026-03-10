@@ -28,7 +28,8 @@ import {
   orderBy,
   limit,
   serverTimestamp,
-  writeBatch
+  writeBatch,
+  collectionGroup
 } from "firebase/firestore";
 
 type UserType = {
@@ -40,6 +41,7 @@ type UserType = {
   profileCompleted?: boolean;
   displayName?: string;
   photoUrl?: string;
+  blocked?: boolean;
   [key: string]: any; // Allow other properties like anamnesis, cpf, etc.
 };
 
@@ -70,9 +72,17 @@ function AuthProvider({ children }: { children: ReactNode }) {
         const userDocRef = doc(db, "users", firebaseUser.uid);
         const unsubscribeDoc = onSnapshot(userDocRef, (docSnap) => {
           if (docSnap.exists()) {
-            console.log("AuthProvider: Perfil encontrado no Firestore.");
-            setUser({ id: firebaseUser.uid, ...docSnap.data() } as UserType);
-            setAuthError(null);
+            const userData = docSnap.data() as UserType;
+            if (userData.blocked) {
+              console.warn("AuthProvider: Usuário bloqueado.");
+              signOut(auth);
+              setUser(null);
+              alert("Sua conta foi bloqueada. Entre em contato com o administrador.");
+            } else {
+              console.log("AuthProvider: Perfil encontrado no Firestore.");
+              setUser({ id: firebaseUser.uid, ...userData });
+              setAuthError(null);
+            }
           } else {
             console.warn("AuthProvider: Perfil ainda não existe no Firestore.");
             setUser(null);
@@ -516,8 +526,9 @@ function CustomCalendar({ selectedDate, onSelectDate, workoutDates = [] }: { sel
   );
 }
 
-function WorkoutBuilder({ client, onBack, existingWorkout }: { client: any, onBack: () => void, existingWorkout?: any }) {
+function WorkoutBuilder({ client, onBack, existingWorkout, personalOverrideId }: { client: any, onBack: () => void, existingWorkout?: any, personalOverrideId?: string }) {
   const { user } = useAuth();
+  const personalId = personalOverrideId || user?.id;
   const [exercises, setExercises] = useState<any[]>(existingWorkout?.exercises || []);
   const [currentExercise, setCurrentExercise] = useState("");
   const [sets, setSets] = useState("3");
@@ -542,12 +553,12 @@ function WorkoutBuilder({ client, onBack, existingWorkout }: { client: any, onBa
   }, [client.id]);
 
   const fetchPastWorkouts = async () => {
-    if (!user) return;
+    if (!personalId) return;
     try {
       const q = query(
         collection(db, "workouts"),
         where("client_id", "==", client.id),
-        where("personal_id", "==", user.id)
+        where("personal_id", "==", personalId)
       );
       const querySnapshot = await getDocs(q);
       const workoutsData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -646,14 +657,14 @@ function WorkoutBuilder({ client, onBack, existingWorkout }: { client: any, onBa
   };
 
   const saveWorkout = async () => {
-    if (exercises.length === 0 || !user) return;
+    if (exercises.length === 0 || !personalId) return;
     setIsSaving(true);
     try {
       // Create a date object from the selected date string, setting time to noon to avoid timezone issues
       const dateObj = new Date(`${workoutDate}T12:00:00Z`);
       
       const workoutData = {
-        personal_id: user.id,
+        personal_id: personalId,
         client_id: client.id,
         date: dateObj.toISOString(),
         exercises,
@@ -1031,12 +1042,106 @@ function WorkoutBuilder({ client, onBack, existingWorkout }: { client: any, onBa
   );
 }
 
+function ClientStatistics({ clientId, onBack }: { clientId: string, onBack: () => void }) {
+  const [workouts, setWorkouts] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchWorkouts = async () => {
+      try {
+        const q = query(
+          collection(db, "workouts"),
+          where("client_id", "==", clientId),
+          where("status", "==", "completed")
+        );
+        const snapshot = await getDocs(q);
+        const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        data.sort((a: any, b: any) => new Date(b.completedAt).getTime() - new Date(a.completedAt).getTime());
+        setWorkouts(data);
+      } catch (error) {
+        console.error("Error fetching statistics:", error);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchWorkouts();
+  }, [clientId]);
+
+  const formatDuration = (seconds: number) => {
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${m}m ${s}s`;
+  };
+
+  const totalWorkouts = workouts.length;
+  const totalDuration = workouts.reduce((acc, w) => acc + (w.duration || 0), 0);
+  const avgDuration = totalWorkouts > 0 ? Math.floor(totalDuration / totalWorkouts) : 0;
+
+  if (loading) {
+    return (
+      <div className="flex justify-center py-12">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-orange-600"></div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div className="bg-neutral-900 p-6 rounded-2xl border border-white/10 shadow-xl">
+          <p className="text-neutral-500 text-xs font-bold uppercase tracking-widest mb-1">Total de Treinos</p>
+          <p className="text-3xl font-black text-white">{totalWorkouts}</p>
+        </div>
+        <div className="bg-neutral-900 p-6 rounded-2xl border border-white/10 shadow-xl">
+          <p className="text-neutral-500 text-xs font-bold uppercase tracking-widest mb-1">Tempo Total</p>
+          <p className="text-3xl font-black text-orange-500">{formatDuration(totalDuration)}</p>
+        </div>
+        <div className="bg-neutral-900 p-6 rounded-2xl border border-white/10 shadow-xl">
+          <p className="text-neutral-500 text-xs font-bold uppercase tracking-widest mb-1">Média por Treino</p>
+          <p className="text-3xl font-black text-emerald-500">{formatDuration(avgDuration)}</p>
+        </div>
+      </div>
+
+      <div className="bg-neutral-900 rounded-2xl border border-white/10 shadow-2xl overflow-hidden">
+        <div className="p-6 border-b border-white/5">
+          <h3 className="text-lg font-bold text-white">Consistência de Tempo</h3>
+        </div>
+        <div className="p-6">
+          {workouts.length === 0 ? (
+            <p className="text-neutral-500 text-center py-8">Nenhum dado de treino concluído disponível.</p>
+          ) : (
+            <div className="space-y-4">
+              {workouts.map((w, i) => (
+                <div key={w.id} className="flex items-center gap-4">
+                  <div className="text-xs text-neutral-500 font-mono w-20">
+                    {new Date(w.completedAt).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}
+                  </div>
+                  <div className="flex-1 h-3 bg-neutral-800 rounded-full overflow-hidden">
+                    <div 
+                      className="h-full bg-orange-600 rounded-full" 
+                      style={{ width: `${Math.min(100, ((w.duration || 0) / (avgDuration * 1.5)) * 100)}%` }}
+                    ></div>
+                  </div>
+                  <div className="text-xs font-bold text-white w-16 text-right">
+                    {formatDuration(w.duration || 0)}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function WorkoutHistory({ client, onBack }: { client: any, onBack: () => void }) {
   const { user } = useAuth();
   const [workouts, setWorkouts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedWorkout, setSelectedWorkout] = useState<any>(null);
   const [editingWorkout, setEditingWorkout] = useState<any>(null);
+  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
 
   useEffect(() => {
     fetchWorkouts();
@@ -1139,13 +1244,15 @@ function WorkoutHistory({ client, onBack }: { client: any, onBack: () => void })
     );
   }
 
+  const selectedDateWorkout = workouts.find(w => w.date.startsWith(selectedDate));
+
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-4">
         <button onClick={onBack} className="p-2 bg-neutral-800 hover:bg-neutral-700 rounded-xl transition-colors">
           <ArrowLeft className="w-5 h-5 text-white" />
         </button>
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 flex-1">
           <div>
             <h2 className="text-2xl font-bold text-white">Histórico de Treinos</h2>
             <p className="text-sm text-neutral-400">Aluno: <span className="text-orange-500 font-medium">{client.name}</span></p>
@@ -1165,75 +1272,158 @@ function WorkoutHistory({ client, onBack }: { client: any, onBack: () => void })
         <div className="flex justify-center py-12">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-orange-600"></div>
         </div>
-      ) : workouts.length === 0 ? (
-        <div className="bg-neutral-900 p-12 rounded-2xl border border-white/10 shadow-2xl text-center">
-          <Activity className="w-12 h-12 text-neutral-700 mx-auto mb-4" />
-          <h3 className="text-xl font-medium text-white mb-2">Nenhum treino encontrado</h3>
-          <p className="text-neutral-500">Este aluno ainda não possui treinos registrados.</p>
-        </div>
       ) : (
-        <div className="grid gap-4">
-          {workouts.map((workout) => (
-            <div 
-              key={workout.id}
-              className="bg-neutral-900 p-6 rounded-2xl border border-white/10 shadow-2xl flex items-center justify-between hover:border-orange-600/50 transition-colors group"
-            >
-              <div className="flex items-center gap-4 cursor-pointer flex-1" onClick={() => setSelectedWorkout(workout)}>
-                <div className="w-12 h-12 bg-orange-600/10 rounded-full flex items-center justify-center">
-                  <CalendarIcon className="w-6 h-6 text-orange-500" />
-                </div>
-                <div>
-                  <h3 className="text-lg font-medium text-white">
-                    Treino de {new Date(workout.date).toLocaleDateString('pt-BR')}
-                  </h3>
-                  <p className="text-sm text-neutral-400">
-                    {workout.exercises.length} exercícios • Status: {workout.status === 'active' ? (
-                      <span className="text-blue-400">Ativo</span>
-                    ) : (
-                      <span className="text-emerald-400 flex items-center gap-1 inline-flex">
-                        <CheckCircle2 className="w-3 h-3" /> Concluído
-                      </span>
-                    )}
-                  </p>
-                </div>
-              </div>
-              <div className="flex items-center gap-2 relative z-[100] shrink-0">
-                <button 
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setSelectedWorkout(workout);
-                  }}
-                  className="p-2 text-neutral-400 hover:text-white hover:bg-neutral-800 rounded-lg transition-colors cursor-pointer relative z-[101]"
-                  title="Ver Detalhes"
-                >
-                  <Play className="w-5 h-5" />
-                </button>
-                <button 
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setEditingWorkout(workout);
-                  }}
-                  className="p-2 text-neutral-400 hover:text-orange-500 hover:bg-orange-500/10 rounded-lg transition-colors cursor-pointer relative z-[101]"
-                  title="Editar Treino"
-                >
-                  <Edit2 className="w-5 h-5" />
-                </button>
-                <button 
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    deleteWorkout(workout.id);
-                  }}
-                  className="p-2 text-neutral-400 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-colors cursor-pointer relative z-[101]"
-                  title="Excluir Treino"
-                >
-                  <Trash2 className="w-5 h-5" />
-                </button>
+        <div className="space-y-8">
+          {/* Calendar for history */}
+          <section className="space-y-6">
+            <h3 className="text-lg font-bold text-white flex items-center gap-2">
+              <CalendarIcon className="w-5 h-5 text-orange-500" />
+              Explorar Histórico por Calendário
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <CustomCalendar 
+                selectedDate={selectedDate} 
+                onSelectDate={setSelectedDate} 
+                workoutDates={workouts.map(w => w.date)}
+              />
+              <div className="space-y-4">
+                <h4 className="text-sm font-bold text-neutral-500 uppercase tracking-wider">
+                  {`Data: ${new Date(selectedDate + "T12:00:00Z").toLocaleDateString('pt-BR')}`}
+                </h4>
+                {selectedDateWorkout ? (
+                  <div className="bg-neutral-900 p-6 rounded-2xl border border-white/10 shadow-2xl flex items-center justify-between hover:border-orange-600/50 transition-colors group">
+                    <div className="flex items-center gap-4 cursor-pointer flex-1" onClick={() => setSelectedWorkout(selectedDateWorkout)}>
+                      <div className="w-12 h-12 bg-orange-600/10 rounded-full flex items-center justify-center">
+                        <CalendarIcon className="w-6 h-6 text-orange-500" />
+                      </div>
+                      <div>
+                        <h3 className="text-lg font-medium text-white">
+                          Treino de {new Date(selectedDateWorkout.date).toLocaleDateString('pt-BR')}
+                        </h3>
+                        <p className="text-sm text-neutral-400">
+                          {selectedDateWorkout.exercises.length} exercícios • Status: {selectedDateWorkout.status === 'active' ? (
+                            <span className="text-blue-400">Ativo</span>
+                          ) : (
+                            <span className="text-emerald-400 flex items-center gap-1 inline-flex">
+                              <CheckCircle2 className="w-3 h-3" /> Concluído
+                            </span>
+                          )}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 relative z-[100] shrink-0">
+                      <button 
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelectedWorkout(selectedDateWorkout);
+                        }}
+                        className="p-2 text-neutral-400 hover:text-white hover:bg-neutral-800 rounded-lg transition-colors cursor-pointer relative z-[101]"
+                        title="Ver Detalhes"
+                      >
+                        <Play className="w-5 h-5" />
+                      </button>
+                      <button 
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setEditingWorkout(selectedDateWorkout);
+                        }}
+                        className="p-2 text-neutral-400 hover:text-orange-500 hover:bg-orange-500/10 rounded-lg transition-colors cursor-pointer relative z-[101]"
+                        title="Editar Treino"
+                      >
+                        <Edit2 className="w-5 h-5" />
+                      </button>
+                      <button 
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          deleteWorkout(selectedDateWorkout.id);
+                        }}
+                        className="p-2 text-neutral-400 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-colors cursor-pointer relative z-[101]"
+                        title="Excluir Treino"
+                      >
+                        <Trash2 className="w-5 h-5" />
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="bg-neutral-900/50 p-12 rounded-2xl border border-white/5 text-center flex flex-col items-center justify-center h-full min-h-[200px]">
+                    <Activity className="w-10 h-10 text-neutral-800 mb-3" />
+                    <p className="text-neutral-600 text-sm">Nenhum treino encontrado nesta data.</p>
+                  </div>
+                )}
               </div>
             </div>
-          ))}
+          </section>
+
+          {/* List of recent history */}
+          <section className="space-y-4">
+            <h3 className="text-lg font-bold text-white">Treinos Recentes</h3>
+            <div className="grid gap-4">
+              {workouts.slice(0, 10).map((workout) => (
+                <div 
+                  key={workout.id}
+                  className="bg-neutral-900 p-6 rounded-2xl border border-white/10 shadow-2xl flex items-center justify-between hover:border-orange-600/50 transition-colors group"
+                >
+                  <div className="flex items-center gap-4 cursor-pointer flex-1" onClick={() => setSelectedWorkout(workout)}>
+                    <div className="w-12 h-12 bg-orange-600/10 rounded-full flex items-center justify-center">
+                      <CalendarIcon className="w-6 h-6 text-orange-500" />
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-medium text-white">
+                        Treino de {new Date(workout.date).toLocaleDateString('pt-BR')}
+                      </h3>
+                      <p className="text-sm text-neutral-400">
+                        {workout.exercises.length} exercícios • Status: {workout.status === 'active' ? (
+                          <span className="text-blue-400">Ativo</span>
+                        ) : (
+                          <span className="text-emerald-400 flex items-center gap-1 inline-flex">
+                            <CheckCircle2 className="w-3 h-3" /> Concluído
+                          </span>
+                        )}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 relative z-[100] shrink-0">
+                    <button 
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedWorkout(workout);
+                      }}
+                      className="p-2 text-neutral-400 hover:text-white hover:bg-neutral-800 rounded-lg transition-colors cursor-pointer relative z-[101]"
+                      title="Ver Detalhes"
+                    >
+                      <Play className="w-5 h-5" />
+                    </button>
+                    <button 
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setEditingWorkout(workout);
+                      }}
+                      className="p-2 text-neutral-400 hover:text-orange-500 hover:bg-orange-500/10 rounded-lg transition-colors cursor-pointer relative z-[101]"
+                      title="Editar Treino"
+                    >
+                      <Edit2 className="w-5 h-5" />
+                    </button>
+                    <button 
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        deleteWorkout(workout.id);
+                      }}
+                      className="p-2 text-neutral-400 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-colors cursor-pointer relative z-[101]"
+                      title="Excluir Treino"
+                    >
+                      <Trash2 className="w-5 h-5" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
         </div>
       )}
     </div>
@@ -1433,7 +1623,7 @@ function PersonalDashboard() {
   const [showAdd, setShowAdd] = useState(false);
   const [sortBy, setSortBy] = useState<"name" | "date">("name");
   const [selectedClient, setSelectedClient] = useState<any>(null);
-  const [clientTab, setClientTab] = useState<"workouts" | "history" | "assessments">("workouts");
+  const [clientTab, setClientTab] = useState<"workouts" | "history" | "assessments" | "statistics">("workouts");
   const [chatRoom, setChatRoom] = useState<{ id: string; name: string } | null>(null);
   const [inviteEmail, setInviteEmail] = useState("");
   const [isInviting, setIsInviting] = useState(false);
@@ -1613,19 +1803,27 @@ function PersonalDashboard() {
         >
           Avaliações
         </button>
+        <button
+          onClick={() => setClientTab("statistics")}
+          className={`flex-1 py-2 text-sm font-medium rounded-lg transition-colors ${clientTab === "statistics" ? "bg-orange-600 text-white shadow-md" : "text-neutral-400 hover:text-white"}`}
+        >
+          Estatísticas
+        </button>
       </div>
         
         {clientTab === "workouts" ? (
           <WorkoutBuilder client={selectedClient} onBack={() => setSelectedClient(null)} />
         ) : clientTab === "history" ? (
           <WorkoutHistory client={selectedClient} onBack={() => setSelectedClient(null)} />
-        ) : (
+        ) : clientTab === "assessments" ? (
           <AssessmentView 
             clientId={selectedClient.id} 
             clientName={selectedClient.name} 
             onBack={() => setSelectedClient(null)} 
             isPersonal={true} 
           />
+        ) : (
+          <ClientStatistics clientId={selectedClient.id} onBack={() => setSelectedClient(null)} />
         )}
       </div>
     );
@@ -1835,9 +2033,47 @@ function ClientWorkoutView({ workout, onBack, isPersonal: isPersonalProp }: { wo
   const [isFinishing, setIsFinishing] = useState(false);
   const [chatRoom, setChatRoom] = useState<{ id: string; name: string } | null>(null);
   const [recipientName, setRecipientName] = useState("Carregando...");
+  const [isEditing, setIsEditing] = useState(false);
+  const [startTime, setStartTime] = useState<number | null>(workout.startTime || null);
+  const [elapsedTime, setElapsedTime] = useState(0);
 
   const isPersonal = isPersonalProp !== undefined ? isPersonalProp : user?.role === "personal";
+  const isSuperAdmin = user?.role === "superadmin";
   const isCompleted = workout.status === "completed";
+
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    if (startTime && !isCompleted) {
+      interval = setInterval(() => {
+        setElapsedTime(Math.floor((Date.now() - startTime) / 1000));
+      }, 1000);
+    }
+    return () => clearInterval(interval);
+  }, [startTime, isCompleted]);
+
+  const startWorkout = async () => {
+    const now = Date.now();
+    setStartTime(now);
+    try {
+      await updateDoc(doc(db, "workouts", workout.id), {
+        startTime: now,
+        status: "in_progress"
+      });
+    } catch (error) {
+      console.error("Error starting workout:", error);
+    }
+  };
+
+  if (isEditing) {
+    return (
+      <WorkoutBuilder 
+        client={{ id: workout.client_id, name: "Aluno" }} 
+        onBack={() => setIsEditing(false)} 
+        existingWorkout={workout}
+        personalOverrideId={isSuperAdmin ? workout.personal_id : undefined}
+      />
+    );
+  }
 
   useEffect(() => {
     const fetchRecipient = async () => {
@@ -1933,6 +2169,9 @@ function ClientWorkoutView({ workout, onBack, isPersonal: isPersonalProp }: { wo
 
     setIsFinishing(true);
     try {
+      const endTime = Date.now();
+      const duration = startTime ? Math.floor((endTime - startTime) / 1000) : 0;
+
       console.log("ClientWorkoutView: Updating workout doc...");
       await updateDoc(doc(db, "workouts", workout.id), {
         status: "completed",
@@ -1940,7 +2179,8 @@ function ClientWorkoutView({ workout, onBack, isPersonal: isPersonalProp }: { wo
         exerciseFeedback,
         exerciseLoads,
         overallFeedback,
-        completedAt: new Date().toISOString()
+        completedAt: new Date().toISOString(),
+        duration: duration // duration in seconds
       });
       console.log("ClientWorkoutView: Workout update successful");
       alert("Treino finalizado com sucesso! Bom trabalho!");
@@ -1970,6 +2210,24 @@ function ClientWorkoutView({ workout, onBack, isPersonal: isPersonalProp }: { wo
           </div>
         </div>
         <div className="flex items-center gap-3">
+          {(isPersonal || isSuperAdmin) && (
+            <>
+              <button 
+                onClick={() => setIsEditing(true)}
+                className="p-2 bg-neutral-800 hover:bg-orange-600/20 text-orange-500 rounded-xl transition-colors border border-white/5"
+                title="Editar Treino"
+              >
+                <Edit2 className="w-4 h-4" />
+              </button>
+              <button 
+                onClick={deleteWorkout}
+                className="p-2 bg-neutral-800 hover:bg-red-600/20 text-red-500 rounded-xl transition-colors border border-white/5"
+                title="Excluir Treino"
+              >
+                <Trash2 className="w-4 h-4" />
+              </button>
+            </>
+          )}
           <button
             onClick={() => setChatRoom({ 
               id: isPersonal ? `chat_${user?.id}_${workout.client_id}` : `chat_${workout.personal_id}_${user?.id}`, 
@@ -1980,21 +2238,6 @@ function ClientWorkoutView({ workout, onBack, isPersonal: isPersonalProp }: { wo
             <MessageSquare className="w-4 h-4" />
             Chat
           </button>
-          {isCompleted && (
-            <div className="hidden sm:flex bg-emerald-500/10 text-emerald-400 px-4 py-2 rounded-full border border-emerald-500/20 items-center gap-2 font-medium">
-              <CheckCircle2 className="w-5 h-5" />
-              Concluído
-            </div>
-          )}
-          {isPersonal && (
-            <button 
-              onClick={deleteWorkout}
-              className="p-2 text-red-500 hover:bg-red-500/10 rounded-xl transition-colors"
-              title="Excluir Treino"
-            >
-              <Trash2 className="w-6 h-6" />
-            </button>
-          )}
         </div>
       </div>
 
@@ -2004,6 +2247,60 @@ function ClientWorkoutView({ workout, onBack, isPersonal: isPersonalProp }: { wo
           recipientName={chatRoom.name} 
           onClose={() => setChatRoom(null)} 
         />
+      )}
+
+      {/* Workout Timer / Status Bar */}
+      {!isPersonal && !isCompleted && (
+        <div className="bg-neutral-900 p-6 rounded-2xl border border-white/10 shadow-2xl flex flex-col sm:flex-row items-center justify-between gap-6">
+          {!startTime ? (
+            <div className="flex-1 text-center sm:text-left">
+              <h3 className="text-lg font-bold text-white">Pronto para começar?</h3>
+              <p className="text-neutral-500 text-sm">Inicie o cronômetro para registrar seu tempo de treino.</p>
+            </div>
+          ) : (
+            <div className="flex-1 text-center sm:text-left">
+              <h3 className="text-lg font-bold text-white flex items-center justify-center sm:justify-start gap-2">
+                <Clock className="w-5 h-5 text-orange-500 animate-pulse" />
+                Treino em Andamento
+              </h3>
+              <div className="text-3xl font-black text-orange-500 font-mono mt-1">
+                {formatTime(elapsedTime)}
+              </div>
+            </div>
+          )}
+          
+          {!startTime ? (
+            <button 
+              onClick={startWorkout}
+              className="w-full sm:w-auto bg-orange-600 hover:bg-orange-500 text-white px-8 py-4 rounded-2xl font-black text-lg shadow-xl shadow-orange-600/20 transition-all transform active:scale-95 flex items-center justify-center gap-2"
+            >
+              <Play className="w-6 h-6 fill-current" />
+              INICIAR TREINO
+            </button>
+          ) : (
+            <button 
+              onClick={finishWorkout}
+              disabled={isFinishing}
+              className="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-500 text-white px-8 py-4 rounded-2xl font-black text-lg shadow-xl shadow-emerald-600/20 transition-all transform active:scale-95 flex items-center justify-center gap-2 disabled:opacity-50"
+            >
+              {isFinishing ? "FINALIZANDO..." : <><CheckCircle2 className="w-6 h-6" /> FINALIZAR TREINO</>}
+            </button>
+          )}
+        </div>
+      )}
+
+      {isCompleted && workout.duration && (
+        <div className="bg-neutral-900 p-6 rounded-2xl border border-emerald-500/20 shadow-2xl flex items-center justify-between">
+          <div>
+            <h3 className="text-neutral-500 text-xs font-bold uppercase tracking-widest">Tempo Total de Treino</h3>
+            <div className="text-2xl font-black text-emerald-400 font-mono">
+              {formatTime(workout.duration)}
+            </div>
+          </div>
+          <div className="w-12 h-12 bg-emerald-500/10 rounded-full flex items-center justify-center">
+            <Clock className="w-6 h-6 text-emerald-500" />
+          </div>
+        </div>
       )}
 
       <div className="grid gap-6">
@@ -2268,6 +2565,16 @@ function ClientDashboard({ onViewAllWorkouts, onViewSubscriptions }: { onViewAll
   const [workouts, setWorkouts] = useState<any[]>([]);
   const [selectedWorkout, setSelectedWorkout] = useState<any>(null);
   const [chatRoom, setChatRoom] = useState<{ id: string; name: string } | null>(null);
+  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+
+  const todayStr = new Date().toISOString().split('T')[0];
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const tomorrowStr = tomorrow.toISOString().split('T')[0];
+
+  const todayWorkout = workouts.find(w => w.date.startsWith(todayStr));
+  const tomorrowWorkout = workouts.find(w => w.date.startsWith(tomorrowStr));
+  const selectedDateWorkout = workouts.find(w => w.date.startsWith(selectedDate));
 
   useEffect(() => {
     if (user) {
@@ -2401,6 +2708,68 @@ function ClientDashboard({ onViewAllWorkouts, onViewSubscriptions }: { onViewAll
         />
       )}
 
+      <div className="space-y-8 mt-8">
+        {/* Today's Workout */}
+        <section>
+          <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
+            <div className="w-1 h-6 bg-orange-500 rounded-full"></div>
+            Treino de Hoje
+          </h3>
+          {todayWorkout ? (
+            <ClientWorkoutsList workouts={[todayWorkout]} onSelectWorkout={setSelectedWorkout} />
+          ) : (
+            <div className="bg-neutral-900/50 p-8 rounded-2xl border border-dashed border-white/10 text-center">
+              <p className="text-neutral-500 text-sm">Nenhum treino agendado para hoje.</p>
+            </div>
+          )}
+        </section>
+
+        {/* Tomorrow's Workout */}
+        <section>
+          <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
+            <div className="w-1 h-6 bg-neutral-700 rounded-full"></div>
+            Treino de Amanhã
+          </h3>
+          {tomorrowWorkout ? (
+            <ClientWorkoutsList workouts={[tomorrowWorkout]} onSelectWorkout={setSelectedWorkout} />
+          ) : (
+            <div className="bg-neutral-900/50 p-8 rounded-2xl border border-dashed border-white/10 text-center">
+              <p className="text-neutral-500 text-sm">Nenhum treino agendado para amanhã.</p>
+            </div>
+          )}
+        </section>
+
+        {/* Calendar and Selection */}
+        <section className="space-y-6">
+          <h3 className="text-lg font-bold text-white flex items-center gap-2">
+            <CalendarIcon className="w-5 h-5 text-orange-500" />
+            Explorar Calendário
+          </h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <CustomCalendar 
+              selectedDate={selectedDate} 
+              onSelectDate={setSelectedDate} 
+              workoutDates={workouts.map(w => w.date)}
+            />
+            <div className="space-y-4">
+              <h4 className="text-sm font-bold text-neutral-500 uppercase tracking-wider">
+                {selectedDate === todayStr ? "Selecionado: Hoje" : 
+                 selectedDate === tomorrowStr ? "Selecionado: Amanhã" : 
+                 `Selecionado: ${new Date(selectedDate + "T12:00:00Z").toLocaleDateString('pt-BR')}`}
+              </h4>
+              {selectedDateWorkout ? (
+                <ClientWorkoutsList workouts={[selectedDateWorkout]} onSelectWorkout={setSelectedWorkout} />
+              ) : (
+                <div className="bg-neutral-900/50 p-12 rounded-2xl border border-white/5 text-center flex flex-col items-center justify-center h-full min-h-[200px]">
+                  <Activity className="w-10 h-10 text-neutral-800 mb-3" />
+                  <p className="text-neutral-600 text-sm">Nenhum treino para esta data.</p>
+                </div>
+              )}
+            </div>
+          </div>
+        </section>
+      </div>
+
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-8">
         <div className="bg-neutral-900 p-6 rounded-2xl border border-white/10 shadow-2xl">
           <div className="flex items-center justify-between mb-4">
@@ -2433,8 +2802,9 @@ function ClientDashboard({ onViewAllWorkouts, onViewSubscriptions }: { onViewAll
   );
 }
 
-function CompleteProfile({ isEditing = false }: { isEditing?: boolean }) {
-  const { user, updateUser } = useAuth();
+function CompleteProfile({ isEditing = false, userOverride = null, onComplete = null }: { isEditing?: boolean, userOverride?: UserType | null, onComplete?: () => void | null }) {
+  const { user: authUser, updateUser } = useAuth();
+  const user = userOverride || authUser;
   const [cpf, setCpf] = useState(user?.cpf || "");
   const [cep, setCep] = useState(user?.cep || "");
   const [address, setAddress] = useState(user?.address || "");
@@ -2496,9 +2866,14 @@ function CompleteProfile({ isEditing = false }: { isEditing?: boolean }) {
       };
 
       await updateDoc(doc(db, "users", user.id), dataToUpdate);
-      updateUser(dataToUpdate);
       
-      if (isEditing) {
+      if (!userOverride) {
+        updateUser(dataToUpdate);
+      }
+      
+      if (onComplete) {
+        onComplete();
+      } else if (isEditing) {
         alert("Perfil atualizado com sucesso!");
       } else {
         // Redirecionar para a tela inicial após concluir o cadastro inicial
@@ -2756,8 +3131,9 @@ function CompleteProfile({ isEditing = false }: { isEditing?: boolean }) {
   );
 }
 
-function ClientWorkoutsTab() {
-  const { user } = useAuth();
+function ClientWorkoutsTab({ userOverride = null }: { userOverride?: UserType | null }) {
+  const { user: authUser } = useAuth();
+  const user = userOverride || authUser;
   const [workouts, setWorkouts] = useState<any[]>([]);
   const [selectedWorkout, setSelectedWorkout] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -3024,6 +3400,11 @@ function SuperAdminDashboard() {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
   const [filterRole, setFilterRole] = useState<"all" | "personal" | "client" | "superadmin">("all");
+  const [globalMessage, setGlobalMessage] = useState("");
+  const [messageTarget, setMessageTarget] = useState<"all" | "personal" | "client">("all");
+  const [isSending, setIsSending] = useState(false);
+  const [editingUser, setEditingUser] = useState<UserType | null>(null);
+  const [impersonatedUser, setImpersonatedUser] = useState<UserType | null>(null);
 
   useEffect(() => {
     fetchUsers();
@@ -3054,6 +3435,37 @@ function SuperAdminDashboard() {
     }
   };
 
+  const toggleBlockUser = async (userId: string, currentStatus: boolean) => {
+    try {
+      await updateDoc(doc(db, "users", userId), { blocked: !currentStatus });
+      setUsers(prev => prev.map(u => u.id === userId ? { ...u, blocked: !currentStatus } : u));
+      alert(currentStatus ? "Usuário desbloqueado!" : "Usuário bloqueado!");
+    } catch (error) {
+      console.error("Error toggling block:", error);
+      alert("Erro ao alterar status do usuário.");
+    }
+  };
+
+  const sendSystemMessage = async (target: string, text: string) => {
+    if (!text.trim()) return;
+    setIsSending(true);
+    try {
+      await addDoc(collection(db, "system_messages"), {
+        text,
+        target,
+        active: true,
+        createdAt: serverTimestamp()
+      });
+      alert("Mensagem enviada com sucesso!");
+      setGlobalMessage("");
+    } catch (error) {
+      console.error("Error sending message:", error);
+      alert("Erro ao enviar mensagem.");
+    } finally {
+      setIsSending(false);
+    }
+  };
+
   const filteredUsers = users.filter(u => {
     const matchesSearch = u.name?.toLowerCase().includes(searchTerm.toLowerCase()) || 
                          u.email?.toLowerCase().includes(searchTerm.toLowerCase());
@@ -3064,6 +3476,30 @@ function SuperAdminDashboard() {
   const personals = filteredUsers.filter(u => u.role === "personal");
   const clients = filteredUsers.filter(u => u.role === "client");
   const admins = filteredUsers.filter(u => u.role === "superadmin");
+
+  if (impersonatedUser) {
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center justify-between bg-orange-600/10 p-4 rounded-2xl border border-orange-500/20">
+          <div className="flex items-center gap-3">
+            <AlertTriangle className="w-5 h-5 text-orange-500" />
+            <p className="text-orange-500 font-bold text-sm">Modo de Edição: {impersonatedUser.name}</p>
+          </div>
+          <button 
+            onClick={() => setImpersonatedUser(null)}
+            className="bg-orange-600 text-white px-4 py-2 rounded-xl text-xs font-bold"
+          >
+            Sair da Edição
+          </button>
+        </div>
+        {impersonatedUser.role === "personal" ? (
+          <PersonalDashboardViewOverride userOverride={impersonatedUser} />
+        ) : (
+          <ClientDashboardViewOverride userOverride={impersonatedUser} />
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -3078,6 +3514,39 @@ function SuperAdminDashboard() {
         >
           <RefreshCw className={`w-5 h-5 text-orange-500 ${loading ? 'animate-spin' : ''}`} />
         </button>
+      </div>
+
+      {/* Global Messaging */}
+      <div className="bg-neutral-900 p-6 rounded-2xl border border-white/10 shadow-2xl space-y-4">
+        <div className="flex items-center gap-3 mb-2">
+          <Send className="w-5 h-5 text-orange-500" />
+          <h3 className="text-lg font-bold text-white">Enviar Mensagem Global</h3>
+        </div>
+        <div className="flex flex-col sm:flex-row gap-4">
+          <select 
+            value={messageTarget}
+            onChange={(e) => setMessageTarget(e.target.value as any)}
+            className="bg-neutral-800 border border-white/5 text-white text-sm rounded-xl px-4 py-3 focus:ring-orange-500 outline-none"
+          >
+            <option value="all">Todos os Usuários</option>
+            <option value="personal">Apenas Personals</option>
+            <option value="client">Apenas Alunos</option>
+          </select>
+          <input 
+            type="text"
+            placeholder="Digite o aviso que aparecerá no login..."
+            value={globalMessage}
+            onChange={(e) => setGlobalMessage(e.target.value)}
+            className="flex-1 bg-neutral-800 border border-white/5 rounded-xl px-4 py-3 text-white focus:ring-orange-500 outline-none"
+          />
+          <button 
+            onClick={() => sendSystemMessage(messageTarget, globalMessage)}
+            disabled={isSending || !globalMessage.trim()}
+            className="bg-orange-600 hover:bg-orange-500 text-white px-6 py-3 rounded-xl font-bold transition-all disabled:opacity-50"
+          >
+            Enviar
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -3124,6 +3593,12 @@ function SuperAdminDashboard() {
               title="Personals" 
               users={personals} 
               onUpdateRole={updateUserRole} 
+              onToggleBlock={toggleBlockUser}
+              onSendMessage={(id) => {
+                const text = prompt("Digite a mensagem para este usuário:");
+                if (text) sendSystemMessage(id, text);
+              }}
+              onImpersonate={setImpersonatedUser}
               icon={<Users className="w-5 h-5 text-blue-400" />}
             />
           )}
@@ -3134,6 +3609,12 @@ function SuperAdminDashboard() {
               title="Alunos" 
               users={clients} 
               onUpdateRole={updateUserRole} 
+              onToggleBlock={toggleBlockUser}
+              onSendMessage={(id) => {
+                const text = prompt("Digite a mensagem para este usuário:");
+                if (text) sendSystemMessage(id, text);
+              }}
+              onImpersonate={setImpersonatedUser}
               icon={<Dumbbell className="w-5 h-5 text-emerald-400" />}
             />
           )}
@@ -3144,6 +3625,9 @@ function SuperAdminDashboard() {
               title="Administradores" 
               users={admins} 
               onUpdateRole={null} 
+              onToggleBlock={null}
+              onSendMessage={null}
+              onImpersonate={null}
               icon={<Activity className="w-5 h-5 text-purple-400" />}
             />
           )}
@@ -3160,7 +3644,15 @@ function SuperAdminDashboard() {
   );
 }
 
-function UserTable({ title, users, onUpdateRole, icon }: { title: string, users: UserType[], onUpdateRole: ((id: string, role: "personal" | "client") => void) | null, icon: ReactNode }) {
+function UserTable({ title, users, onUpdateRole, onToggleBlock, onSendMessage, onImpersonate, icon }: { 
+  title: string, 
+  users: UserType[], 
+  onUpdateRole: ((id: string, role: "personal" | "client") => void) | null,
+  onToggleBlock: ((id: string, current: boolean) => void) | null,
+  onSendMessage: ((id: string) => void) | null,
+  onImpersonate: ((user: UserType) => void) | null,
+  icon: ReactNode 
+}) {
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-2 px-2">
@@ -3177,7 +3669,8 @@ function UserTable({ title, users, onUpdateRole, icon }: { title: string, users:
               <tr>
                 <th className="px-6 py-4">Usuário</th>
                 <th className="px-6 py-4">Role Atual</th>
-                {onUpdateRole && <th className="px-6 py-4">Ações</th>}
+                <th className="px-6 py-4">Status</th>
+                <th className="px-6 py-4">Ações</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-white/5">
@@ -3207,20 +3700,54 @@ function UserTable({ title, users, onUpdateRole, icon }: { title: string, users:
                       {user.role === 'client' ? 'Aluno' : user.role}
                     </span>
                   </td>
-                  {onUpdateRole && (
-                    <td className="px-6 py-4">
-                      <div className="flex items-center gap-2">
+                  <td className="px-6 py-4">
+                    <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                      user.blocked ? 'bg-red-500/10 text-red-400 border border-red-500/20' : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                    }`}>
+                      {user.blocked ? 'Bloqueado' : 'Ativo'}
+                    </span>
+                  </td>
+                  <td className="px-6 py-4">
+                    <div className="flex items-center gap-2">
+                      {onUpdateRole && (
                         <select 
                           value={user.role}
                           onChange={(e) => onUpdateRole(user.id, e.target.value as any)}
-                          className="bg-neutral-800 border border-white/5 text-white text-xs rounded-lg p-1.5 focus:ring-orange-500 focus:border-orange-500"
+                          className="bg-neutral-800 border border-white/5 text-white text-xs rounded-lg p-1.5 focus:ring-orange-500 outline-none"
                         >
                           <option value="client">Aluno</option>
                           <option value="personal">Personal</option>
                         </select>
-                      </div>
-                    </td>
-                  )}
+                      )}
+                      {onToggleBlock && (
+                        <button 
+                          onClick={() => onToggleBlock(user.id, !!user.blocked)}
+                          className={`p-2 rounded-lg transition-colors ${user.blocked ? 'text-emerald-500 hover:bg-emerald-500/10' : 'text-red-500 hover:bg-red-500/10'}`}
+                          title={user.blocked ? "Desbloquear" : "Bloquear"}
+                        >
+                          {user.blocked ? <CheckCircle2 className="w-4 h-4" /> : <X className="w-4 h-4" />}
+                        </button>
+                      )}
+                      {onSendMessage && (
+                        <button 
+                          onClick={() => onSendMessage(user.id)}
+                          className="p-2 text-orange-500 hover:bg-orange-500/10 rounded-lg transition-colors"
+                          title="Enviar Mensagem"
+                        >
+                          <MessageSquare className="w-4 h-4" />
+                        </button>
+                      )}
+                      {onImpersonate && (
+                        <button 
+                          onClick={() => onImpersonate(user)}
+                          className="p-2 text-blue-500 hover:bg-blue-500/10 rounded-lg transition-colors"
+                          title="Editar/Ver como Usuário"
+                        >
+                          <Edit2 className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -3231,9 +3758,137 @@ function UserTable({ title, users, onUpdateRole, icon }: { title: string, users:
   );
 }
 
+function PersonalDashboardViewOverride({ userOverride }: { userOverride: UserType }) {
+  return (
+    <div className="space-y-6">
+      <div className="bg-neutral-900 p-8 rounded-2xl border border-white/10">
+        <h3 className="text-xl font-bold text-white mb-6">Editar Perfil do Personal</h3>
+        <CompleteProfile isEditing={true} userOverride={userOverride} />
+      </div>
+    </div>
+  );
+}
+
+function ClientDashboardViewOverride({ userOverride }: { userOverride: UserType }) {
+  return (
+    <div className="space-y-6">
+      <div className="bg-neutral-900 p-8 rounded-2xl border border-white/10">
+        <h3 className="text-xl font-bold text-white mb-6">Editar Perfil do Aluno</h3>
+        <CompleteProfile isEditing={true} userOverride={userOverride} />
+      </div>
+      <div className="bg-neutral-900 p-8 rounded-2xl border border-white/10">
+        <h3 className="text-xl font-bold text-white mb-6">Treinos do Aluno</h3>
+        <ClientWorkoutsTab userOverride={userOverride} />
+      </div>
+    </div>
+  );
+}
+
+function SystemBanner() {
+  const { user } = useAuth();
+  const [messages, setMessages] = useState<any[]>([]);
+
+  useEffect(() => {
+    if (!user) return;
+    const q = query(collection(db, "system_messages"), where("active", "==", true));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const msgs = snapshot.docs
+        .map(doc => ({ id: doc.id, ...doc.data() }))
+        .filter((msg: any) => {
+          if (msg.target === "all") return true;
+          if (msg.target === user.role) return true;
+          if (msg.target === user.id) return true;
+          return false;
+        });
+      setMessages(msgs);
+    });
+    return () => unsubscribe();
+  }, [user]);
+
+  if (messages.length === 0) return null;
+
+  return (
+    <div className="fixed top-0 left-0 right-0 z-[1000] flex flex-col gap-1">
+      {messages.map((msg) => (
+        <div key={msg.id} className="bg-orange-600 text-white px-4 py-2 text-center text-xs font-bold shadow-lg flex items-center justify-center gap-2">
+          <AlertTriangle className="w-4 h-4" />
+          {msg.text}
+          <button 
+            onClick={async () => {
+              setMessages(prev => prev.filter(m => m.id !== msg.id));
+            }}
+            className="ml-4 hover:bg-white/20 p-1 rounded"
+          >
+            <X className="w-3 h-3" />
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function Dashboard() {
   const { user, loading, logout } = useAuth();
   const [activeTab, setActiveTab] = useState("home");
+  const [hasUnreadMessages, setHasUnreadMessages] = useState(false);
+
+  useEffect(() => {
+    if (!user || user.role === 'superadmin') return;
+    
+    const roomUnsubscribes = new Map<string, () => void>();
+    
+    const roleField = user.role === 'personal' ? 'personal_id' : 'client_id';
+    const connectionsQ = query(collection(db, "connections"), where(roleField, "==", user.id));
+    
+    const unsubConnections = onSnapshot(connectionsQ, (snapshot) => {
+      snapshot.docChanges().forEach((change) => {
+        const data = change.doc.data();
+        const roomId = `chat_${data.personal_id}_${data.client_id}`;
+        
+        if (change.type === "added") {
+          if (!roomUnsubscribes.has(roomId)) {
+            const mq = query(
+              collection(db, "chats", roomId, "messages"),
+              orderBy("createdAt", "desc"),
+              limit(1)
+            );
+            
+            let isInitial = true;
+            const unsub = onSnapshot(mq, (mSnapshot) => {
+              if (isInitial) {
+                isInitial = false;
+                return;
+              }
+              
+              mSnapshot.docChanges().forEach((mChange) => {
+                if (mChange.type === "added") {
+                  const msg = mChange.doc.data();
+                  if (msg.senderId !== user.id) {
+                    setHasUnreadMessages(true);
+                    const audio = new Audio('https://cdn.pixabay.com/audio/2022/03/10/audio_c35078174a.mp3');
+                    audio.volume = 0.3;
+                    audio.play().catch(() => {});
+                  }
+                }
+              });
+            });
+            roomUnsubscribes.set(roomId, unsub);
+          }
+        } else if (change.type === "removed") {
+          const unsub = roomUnsubscribes.get(roomId);
+          if (unsub) {
+            unsub();
+            roomUnsubscribes.delete(roomId);
+          }
+        }
+      });
+    });
+    
+    return () => {
+      unsubConnections();
+      roomUnsubscribes.forEach(unsub => unsub());
+    };
+  }, [user]);
 
   // Se estiver carregando OU se estiver logado no Firebase mas o perfil ainda não chegou do Firestore
   if (loading || (auth.currentUser && !user)) {
@@ -3255,6 +3910,7 @@ function Dashboard() {
 
   return (
     <div className="min-h-screen bg-neutral-950 font-sans text-neutral-200 pb-20 sm:pb-0">
+      <SystemBanner />
       <nav className="bg-neutral-900 border-b border-white/10 sticky top-0 z-10 hidden sm:block">
         <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between h-16 items-center">
@@ -3303,6 +3959,19 @@ function Dashboard() {
             </div>
 
             <div className="flex items-center gap-4">
+              <button 
+                onClick={() => {
+                  setActiveTab("home");
+                  setHasUnreadMessages(false);
+                }}
+                className={`relative p-2 rounded-full transition-colors ${hasUnreadMessages ? "text-orange-500 bg-orange-500/10 animate-pulse" : "text-neutral-400 hover:bg-white/5"}`}
+                title="Mensagens"
+              >
+                <MessageSquare className="w-5 h-5" />
+                {hasUnreadMessages && (
+                  <span className="absolute top-0 right-0 w-2 h-2 bg-red-500 rounded-full border border-neutral-900"></span>
+                )}
+              </button>
               <button 
                 onClick={() => setActiveTab("profile")}
                 className="flex items-center gap-3 hover:bg-white/5 p-1 pr-3 rounded-full transition-colors"
@@ -3469,10 +4138,16 @@ function Dashboard() {
       <div className="sm:hidden fixed bottom-0 left-0 right-0 bg-neutral-900 border-t border-white/10 pb-safe">
         <div className="flex justify-around items-center h-16 px-2">
           <button 
-            onClick={() => setActiveTab("home")}
+            onClick={() => {
+              setActiveTab("home");
+              setHasUnreadMessages(false);
+            }}
             className={`flex flex-col items-center justify-center w-full h-full space-y-1 ${activeTab === "home" ? "text-orange-500" : "text-neutral-500"}`}
           >
-            <Users className="w-5 h-5" />
+            <div className="relative">
+              <Users className="w-5 h-5" />
+              {hasUnreadMessages && <span className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full border border-neutral-900"></span>}
+            </div>
             <span className="text-[10px] font-medium">Rede</span>
           </button>
           <button 
