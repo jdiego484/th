@@ -5,6 +5,8 @@ import { DragDropContext, Droppable, Draggable, DropResult } from "@hello-pangea
 import { auth, db } from "./firebase";
 import { EXERCISES } from "./data/exercises";
 import { AssessmentView } from "./components/AssessmentView";
+import ErrorBoundary from "./components/ErrorBoundary";
+import { handleFirestoreError, OperationType } from "./utils/firestoreErrors";
 import { 
   createUserWithEmailAndPassword, 
   signInWithEmailAndPassword, 
@@ -29,7 +31,8 @@ import {
   limit,
   serverTimestamp,
   writeBatch,
-  collectionGroup
+  collectionGroup,
+  getDocFromServer
 } from "firebase/firestore";
 
 type UserType = {
@@ -63,6 +66,18 @@ function AuthProvider({ children }: { children: ReactNode }) {
   const [authError, setAuthError] = useState<string | null>(null);
 
   useEffect(() => {
+    // Test connection to Firestore
+    async function testConnection() {
+      try {
+        await getDocFromServer(doc(db, 'test', 'connection'));
+      } catch (error) {
+        if(error instanceof Error && error.message.includes('the client is offline')) {
+          console.error("Please check your Firebase configuration. ");
+        }
+      }
+    }
+    testConnection();
+
     console.log("AuthProvider: Iniciando monitoramento...");
     
     const unsubscribeAuth = onAuthStateChanged(auth, (firebaseUser) => {
@@ -89,9 +104,7 @@ function AuthProvider({ children }: { children: ReactNode }) {
           }
           setLoading(false);
         }, (error) => {
-          console.error("AuthProvider: Erro no Firestore Snapshot:", error);
-          setAuthError(`Erro de Banco de Dados: ${error.message}`);
-          setLoading(false);
+          handleFirestoreError(error, OperationType.GET, `users/${firebaseUser.uid}`);
         });
 
         return () => unsubscribeDoc();
@@ -529,17 +542,35 @@ function CustomCalendar({ selectedDate, onSelectDate, workoutDates = [] }: { sel
 function WorkoutBuilder({ client, onBack, existingWorkout, personalOverrideId }: { client: any, onBack: () => void, existingWorkout?: any, personalOverrideId?: string }) {
   const { user } = useAuth();
   const personalId = personalOverrideId || user?.id;
-  const [exercises, setExercises] = useState<any[]>(existingWorkout?.exercises || []);
+  const draftKey = `draft_workout_${user?.id}_${client.id}_${existingWorkout?.id || 'new'}`;
+
+  const [exercises, setExercises] = useState<any[]>(() => {
+    const saved = localStorage.getItem(draftKey);
+    if (saved) {
+      try {
+        return JSON.parse(saved).exercises || existingWorkout?.exercises || [];
+      } catch (e) { return existingWorkout?.exercises || []; }
+    }
+    return existingWorkout?.exercises || [];
+  });
   const [currentExercise, setCurrentExercise] = useState("");
   const [sets, setSets] = useState("3");
   const [reps, setReps] = useState("10");
   const [rest, setRest] = useState("60"); // seconds
   const [prescription, setPrescription] = useState(""); // For cardio
-  const [workoutDate, setWorkoutDate] = useState(
-    existingWorkout?.date 
+  const [workoutDate, setWorkoutDate] = useState(() => {
+    const saved = localStorage.getItem(draftKey);
+    if (saved) {
+      try {
+        return JSON.parse(saved).workoutDate || (existingWorkout?.date 
+          ? new Date(existingWorkout.date).toISOString().split('T')[0] 
+          : new Date().toISOString().split('T')[0]);
+      } catch (e) { }
+    }
+    return existingWorkout?.date 
       ? new Date(existingWorkout.date).toISOString().split('T')[0] 
-      : new Date().toISOString().split('T')[0]
-  );
+      : new Date().toISOString().split('T')[0];
+  });
   const [isSaving, setIsSaving] = useState(false);
   const [showExerciseList, setShowExerciseList] = useState(false);
   const [media, setMedia] = useState<{ url: string, type: 'image' | 'video' } | null>(null);
@@ -547,6 +578,15 @@ function WorkoutBuilder({ client, onBack, existingWorkout, personalOverrideId }:
   const [pastWorkouts, setPastWorkouts] = useState<any[]>([]);
   const [showCopyModal, setShowCopyModal] = useState(false);
   const [error, setError] = useState("");
+
+  // Persist draft to localStorage
+  useEffect(() => {
+    const draft = {
+      exercises,
+      workoutDate
+    };
+    localStorage.setItem(draftKey, JSON.stringify(draft));
+  }, [exercises, workoutDate, draftKey]);
 
   useEffect(() => {
     fetchPastWorkouts();
@@ -678,6 +718,7 @@ function WorkoutBuilder({ client, onBack, existingWorkout, personalOverrideId }:
         await addDoc(collection(db, "workouts"), workoutData);
         alert("Treino salvo com sucesso!");
       }
+      localStorage.removeItem(draftKey);
       onBack();
     } catch (err) {
       console.error(err);
@@ -1493,6 +1534,8 @@ function ChatModal({
       setMessages(msgs);
       setLoading(false);
       isInitialLoad.current = false;
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, `chats/${roomId}/messages`);
     });
 
     return () => unsubscribe();
@@ -2024,22 +2067,90 @@ function PersonalDashboard() {
 
 function ClientWorkoutView({ workout, onBack, isPersonal: isPersonalProp }: { workout: any, onBack: () => void, isPersonal?: boolean }) {
   const { user } = useAuth();
+  const storageKey = `active_workout_${user?.id}_${workout.id}`;
+
   const [activeTimer, setActiveTimer] = useState<string | null>(null);
   const [timeLeft, setTimeLeft] = useState(0);
-  const [completedExercises, setCompletedExercises] = useState<string[]>(workout.completedExercises || []);
-  const [exerciseFeedback, setExerciseFeedback] = useState<Record<string, string>>(workout.exerciseFeedback || {});
-  const [exerciseLoads, setExerciseLoads] = useState<Record<string, string>>(workout.exerciseLoads || {});
-  const [overallFeedback, setOverallFeedback] = useState(workout.overallFeedback || "");
+  
+  // Initialize state from localStorage if available, otherwise from workout prop
+  const [completedExercises, setCompletedExercises] = useState<string[]>(() => {
+    const saved = localStorage.getItem(storageKey);
+    if (saved && workout.status !== 'completed') {
+      try {
+        const parsed = JSON.parse(saved);
+        return parsed.completedExercises || workout.completedExercises || [];
+      } catch (e) { return workout.completedExercises || []; }
+    }
+    return workout.completedExercises || [];
+  });
+
+  const [exerciseFeedback, setExerciseFeedback] = useState<Record<string, string>>(() => {
+    const saved = localStorage.getItem(storageKey);
+    if (saved && workout.status !== 'completed') {
+      try {
+        const parsed = JSON.parse(saved);
+        return parsed.exerciseFeedback || workout.exerciseFeedback || {};
+      } catch (e) { return workout.exerciseFeedback || {}; }
+    }
+    return workout.exerciseFeedback || {};
+  });
+
+  const [exerciseLoads, setExerciseLoads] = useState<Record<string, string>>(() => {
+    const saved = localStorage.getItem(storageKey);
+    if (saved && workout.status !== 'completed') {
+      try {
+        const parsed = JSON.parse(saved);
+        return parsed.exerciseLoads || workout.exerciseLoads || {};
+      } catch (e) { return workout.exerciseLoads || {}; }
+    }
+    return workout.exerciseLoads || {};
+  });
+
+  const [overallFeedback, setOverallFeedback] = useState(() => {
+    const saved = localStorage.getItem(storageKey);
+    if (saved && workout.status !== 'completed') {
+      try {
+        const parsed = JSON.parse(saved);
+        return parsed.overallFeedback || workout.overallFeedback || "";
+      } catch (e) { return workout.overallFeedback || ""; }
+    }
+    return workout.overallFeedback || "";
+  });
+
   const [isFinishing, setIsFinishing] = useState(false);
   const [chatRoom, setChatRoom] = useState<{ id: string; name: string } | null>(null);
   const [recipientName, setRecipientName] = useState("Carregando...");
   const [isEditing, setIsEditing] = useState(false);
-  const [startTime, setStartTime] = useState<number | null>(workout.startTime || null);
+  
+  const [startTime, setStartTime] = useState<number | null>(() => {
+    const saved = localStorage.getItem(storageKey);
+    if (saved && workout.status !== 'completed') {
+      try {
+        const parsed = JSON.parse(saved);
+        return parsed.startTime || workout.startTime || null;
+      } catch (e) { return workout.startTime || null; }
+    }
+    return workout.startTime || null;
+  });
   const [elapsedTime, setElapsedTime] = useState(0);
 
   const isPersonal = isPersonalProp !== undefined ? isPersonalProp : user?.role === "personal";
   const isSuperAdmin = user?.role === "superadmin";
   const isCompleted = workout.status === "completed";
+
+  // Persist state to localStorage
+  useEffect(() => {
+    if (!isPersonal && !isCompleted) {
+      const stateToSave = {
+        completedExercises,
+        exerciseFeedback,
+        exerciseLoads,
+        overallFeedback,
+        startTime
+      };
+      localStorage.setItem(storageKey, JSON.stringify(stateToSave));
+    }
+  }, [completedExercises, exerciseFeedback, exerciseLoads, overallFeedback, startTime, isPersonal, isCompleted, storageKey]);
 
   useEffect(() => {
     let interval: NodeJS.Timeout;
@@ -2098,6 +2209,7 @@ function ClientWorkoutView({ workout, onBack, isPersonal: isPersonalProp }: { wo
     try {
       console.log("ClientWorkoutView: Calling deleteDoc for:", workout.id);
       await deleteDoc(doc(db, "workouts", workout.id));
+      localStorage.removeItem(storageKey);
       console.log("ClientWorkoutView: deleteDoc successful");
       alert("Treino excluído com sucesso!");
       onBack();
@@ -2183,6 +2295,7 @@ function ClientWorkoutView({ workout, onBack, isPersonal: isPersonalProp }: { wo
         duration: duration // duration in seconds
       });
       console.log("ClientWorkoutView: Workout update successful");
+      localStorage.removeItem(storageKey);
       alert("Treino finalizado com sucesso! Bom trabalho!");
       onBack();
     } catch (error: any) {
@@ -3401,14 +3514,28 @@ function SuperAdminDashboard() {
   const [searchTerm, setSearchTerm] = useState("");
   const [filterRole, setFilterRole] = useState<"all" | "personal" | "client" | "superadmin">("all");
   const [globalMessage, setGlobalMessage] = useState("");
+  const [maxViews, setMaxViews] = useState(1);
   const [messageTarget, setMessageTarget] = useState<"all" | "personal" | "client">("all");
+  const [systemMessages, setSystemMessages] = useState<any[]>([]);
   const [isSending, setIsSending] = useState(false);
   const [editingUser, setEditingUser] = useState<UserType | null>(null);
   const [impersonatedUser, setImpersonatedUser] = useState<UserType | null>(null);
 
   useEffect(() => {
     fetchUsers();
+    fetchSystemMessages();
   }, []);
+
+  const fetchSystemMessages = async () => {
+    const q = query(collection(db, "system_messages"), orderBy("createdAt", "desc"));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const msgs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setSystemMessages(msgs);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, "system_messages");
+    });
+    return unsubscribe;
+  };
 
   const fetchUsers = async () => {
     setLoading(true);
@@ -3454,13 +3581,43 @@ function SuperAdminDashboard() {
         text,
         target,
         active: true,
+        maxViews: Number(maxViews) || 1,
         createdAt: serverTimestamp()
       });
       alert("Mensagem enviada com sucesso!");
       setGlobalMessage("");
+      setMaxViews(1);
     } catch (error) {
       console.error("Error sending message:", error);
       alert("Erro ao enviar mensagem.");
+    } finally {
+      setIsSending(false);
+    }
+  };
+
+  const deleteSystemMessage = async (messageId: string) => {
+    if (!window.confirm("Deseja realmente excluir esta mensagem?")) return;
+    try {
+      await deleteDoc(doc(db, "system_messages", messageId));
+      alert("Mensagem excluída!");
+    } catch (error) {
+      console.error("Error deleting message:", error);
+      alert("Erro ao excluir mensagem.");
+    }
+  };
+
+  const clearAllSystemMessages = async () => {
+    if (!window.confirm("Deseja realmente excluir TODAS as mensagens do sistema? Esta ação não pode ser desfeita.")) return;
+    setIsSending(true);
+    try {
+      const q = query(collection(db, "system_messages"));
+      const snapshot = await getDocs(q);
+      const deletePromises = snapshot.docs.map(doc => deleteDoc(doc.ref));
+      await Promise.all(deletePromises);
+      alert("Todas as mensagens foram removidas!");
+    } catch (error) {
+      console.error("Error clearing messages:", error);
+      alert("Erro ao remover mensagens.");
     } finally {
       setIsSending(false);
     }
@@ -3518,11 +3675,21 @@ function SuperAdminDashboard() {
 
       {/* Global Messaging */}
       <div className="bg-neutral-900 p-6 rounded-2xl border border-white/10 shadow-2xl space-y-4">
-        <div className="flex items-center gap-3 mb-2">
-          <Send className="w-5 h-5 text-orange-500" />
-          <h3 className="text-lg font-bold text-white">Enviar Mensagem Global</h3>
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center gap-3">
+            <Send className="w-5 h-5 text-orange-500" />
+            <h3 className="text-lg font-bold text-white">Enviar Mensagem Global</h3>
+          </div>
+          <button 
+            onClick={clearAllSystemMessages}
+            disabled={isSending || systemMessages.length === 0}
+            className="text-xs text-red-500 hover:text-red-400 font-bold flex items-center gap-1 transition-colors"
+          >
+            <Trash2 className="w-3 h-3" />
+            Limpar Todas
+          </button>
         </div>
-        <div className="flex flex-col sm:flex-row gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <select 
             value={messageTarget}
             onChange={(e) => setMessageTarget(e.target.value as any)}
@@ -3534,18 +3701,83 @@ function SuperAdminDashboard() {
           </select>
           <input 
             type="text"
-            placeholder="Digite o aviso que aparecerá no login..."
+            placeholder="Digite o aviso..."
             value={globalMessage}
             onChange={(e) => setGlobalMessage(e.target.value)}
-            className="flex-1 bg-neutral-800 border border-white/5 rounded-xl px-4 py-3 text-white focus:ring-orange-500 outline-none"
+            className="md:col-span-2 bg-neutral-800 border border-white/5 rounded-xl px-4 py-3 text-white focus:ring-orange-500 outline-none"
           />
-          <button 
-            onClick={() => sendSystemMessage(messageTarget, globalMessage)}
-            disabled={isSending || !globalMessage.trim()}
-            className="bg-orange-600 hover:bg-orange-500 text-white px-6 py-3 rounded-xl font-bold transition-all disabled:opacity-50"
-          >
-            Enviar
-          </button>
+          <div className="flex gap-2">
+            <div className="flex-1 relative">
+              <input 
+                type="number"
+                min="1"
+                max="99"
+                value={maxViews}
+                onChange={(e) => setMaxViews(parseInt(e.target.value) || 1)}
+                className="w-full bg-neutral-800 border border-white/5 rounded-xl px-4 py-3 text-white focus:ring-orange-500 outline-none text-center"
+                title="Número de vezes que a mensagem aparecerá para cada usuário"
+              />
+              <span className="absolute -top-2 left-3 bg-neutral-900 px-1 text-[10px] text-neutral-500 font-bold uppercase">Exibições</span>
+            </div>
+            <button 
+              onClick={() => sendSystemMessage(messageTarget, globalMessage)}
+              disabled={isSending || !globalMessage.trim()}
+              className="bg-orange-600 hover:bg-orange-500 text-white px-6 py-3 rounded-xl font-bold transition-all disabled:opacity-50 flex-1"
+            >
+              Enviar
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Active System Messages */}
+      <div className="bg-neutral-900 rounded-2xl border border-white/10 shadow-2xl overflow-hidden">
+        <div className="p-6 border-b border-white/5 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <FileText className="w-5 h-5 text-orange-500" />
+            <h3 className="text-lg font-bold text-white">Mensagens do Sistema Ativas</h3>
+          </div>
+          <span className="bg-orange-600/20 text-orange-500 text-[10px] font-bold px-2 py-1 rounded-full uppercase tracking-widest">
+            {systemMessages.filter(m => m.active).length} Ativas
+          </span>
+        </div>
+        <div className="divide-y divide-white/5">
+          {systemMessages.length === 0 ? (
+            <div className="p-12 text-center text-neutral-500">
+              Nenhuma mensagem enviada.
+            </div>
+          ) : (
+            systemMessages.map((msg) => (
+              <div key={msg.id} className="p-4 flex items-center justify-between hover:bg-white/5 transition-colors">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase ${
+                      msg.target === 'all' ? 'bg-blue-500/20 text-blue-400' :
+                      msg.target === 'personal' ? 'bg-emerald-500/20 text-emerald-400' :
+                      'bg-purple-500/20 text-purple-400'
+                    }`}>
+                      {msg.target === 'all' ? 'Todos' : msg.target === 'personal' ? 'Personals' : 'Alunos'}
+                    </span>
+                    <span className="text-[10px] text-neutral-500">
+                      {msg.createdAt?.toDate ? msg.createdAt.toDate().toLocaleString('pt-BR') : 'Recentemente'}
+                    </span>
+                    {msg.maxViews && (
+                      <span className="text-[10px] text-orange-500/70 font-bold">
+                        • {msg.maxViews} {msg.maxViews === 1 ? 'exibição' : 'exibições'}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-sm text-white">{msg.text}</p>
+                </div>
+                <button 
+                  onClick={() => deleteSystemMessage(msg.id)}
+                  className="p-2 text-neutral-500 hover:text-red-500 hover:bg-red-500/10 rounded-xl transition-all"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
+            ))
+          )}
         </div>
       </div>
 
@@ -3795,15 +4027,32 @@ function SystemBanner() {
       const msgs = snapshot.docs
         .map(doc => ({ id: doc.id, ...doc.data() }))
         .filter((msg: any) => {
-          if (msg.target === "all") return true;
-          if (msg.target === user.role) return true;
-          if (msg.target === user.id) return true;
-          return false;
+          // Check target
+          const isTarget = msg.target === "all" || msg.target === user.role || msg.target === user.id;
+          if (!isTarget) return false;
+
+          // Check view count in localStorage
+          const viewStats = JSON.parse(localStorage.getItem(`system_msg_views_${user.id}`) || "{}");
+          const currentViews = viewStats[msg.id] || 0;
+          const maxViews = msg.maxViews || 1;
+
+          return currentViews < maxViews;
         });
       setMessages(msgs);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, "system_messages");
     });
     return () => unsubscribe();
   }, [user]);
+
+  const dismissMessage = (msgId: string) => {
+    if (!user) return;
+    const storageKey = `system_msg_views_${user.id}`;
+    const viewStats = JSON.parse(localStorage.getItem(storageKey) || "{}");
+    viewStats[msgId] = (viewStats[msgId] || 0) + 1;
+    localStorage.setItem(storageKey, JSON.stringify(viewStats));
+    setMessages(prev => prev.filter(m => m.id !== msgId));
+  };
 
   if (messages.length === 0) return null;
 
@@ -3814,9 +4063,7 @@ function SystemBanner() {
           <AlertTriangle className="w-4 h-4" />
           {msg.text}
           <button 
-            onClick={async () => {
-              setMessages(prev => prev.filter(m => m.id !== msg.id));
-            }}
+            onClick={() => dismissMessage(msg.id)}
             className="ml-4 hover:bg-white/20 p-1 rounded"
           >
             <X className="w-3 h-3" />
@@ -3871,6 +4118,8 @@ function Dashboard() {
                   }
                 }
               });
+            }, (error) => {
+              handleFirestoreError(error, OperationType.GET, `chats/${roomId}/messages`);
             });
             roomUnsubscribes.set(roomId, unsub);
           }
@@ -3882,6 +4131,8 @@ function Dashboard() {
           }
         }
       });
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, "connections");
     });
     
     return () => {
@@ -4285,15 +4536,17 @@ function SubscriptionsView({ onBack }: { onBack: () => void }) {
 
 export default function App() {
   return (
-    <BrowserRouter>
-      <AuthProvider>
-        <Routes>
-          <Route path="/login" element={<Login />} />
-          <Route path="/dashboard" element={<Navigate to="/" replace />} />
-          <Route path="/" element={<Dashboard />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </AuthProvider>
-    </BrowserRouter>
+    <ErrorBoundary>
+      <BrowserRouter>
+        <AuthProvider>
+          <Routes>
+            <Route path="/login" element={<Login />} />
+            <Route path="/dashboard" element={<Navigate to="/" replace />} />
+            <Route path="/" element={<Dashboard />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </AuthProvider>
+      </BrowserRouter>
+    </ErrorBoundary>
   );
 }
