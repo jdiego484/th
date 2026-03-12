@@ -1,12 +1,13 @@
-import { useState, useEffect, useRef, createContext, useContext, ReactNode, FormEvent, ChangeEvent } from "react";
+import React, { useState, useEffect, useRef, FormEvent, ChangeEvent, ReactNode } from "react";
 import { BrowserRouter, Routes, Route, Navigate, useNavigate } from "react-router-dom";
-import { User, LogOut, Users, Dumbbell, Activity, Search, Plus, ArrowLeft, Clock, Play, Check, Trash2, ChevronLeft, ChevronRight, Calendar as CalendarIcon, AlertTriangle, Image as ImageIcon, Video, Upload, X, Copy, Edit2, MessageSquare, CheckCircle2, Circle, GripVertical, Send, CreditCard, FileText, History, RefreshCw } from "lucide-react";
+import { User, LogOut, Users, Dumbbell, Activity, Search, Plus, ArrowLeft, Clock, Play, Check, Trash2, ChevronLeft, ChevronRight, Calendar as CalendarIcon, AlertTriangle, Image as ImageIcon, Video, Upload, X, Copy, Edit2, MessageSquare, CheckCircle2, XCircle, Circle, GripVertical, Send, CreditCard, FileText, History, RefreshCw } from "lucide-react";
 import { DragDropContext, Droppable, Draggable, DropResult } from "@hello-pangea/dnd";
 import { auth, db } from "./firebase";
 import { EXERCISES } from "./data/exercises";
 import { AssessmentView } from "./components/AssessmentView";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { handleFirestoreError, OperationType } from "./utils/firestoreErrors";
+import { AuthProvider, useAuth, UserType } from "./contexts/AuthContext";
 import { 
   createUserWithEmailAndPassword, 
   signInWithEmailAndPassword, 
@@ -34,123 +35,6 @@ import {
   collectionGroup,
   getDocFromServer
 } from "firebase/firestore";
-
-type UserType = {
-  id: string;
-  name: string;
-  email: string;
-  role: "personal" | "client" | "superadmin";
-  personalCode?: string;
-  profileCompleted?: boolean;
-  displayName?: string;
-  photoUrl?: string;
-  blocked?: boolean;
-  [key: string]: any; // Allow other properties like anamnesis, cpf, etc.
-};
-
-const AuthContext = createContext<{
-  user: UserType | null;
-  loading: boolean;
-  logout: () => void;
-  updateUser: (data: Partial<UserType>) => void;
-}>({
-  user: null,
-  loading: true,
-  logout: () => {},
-  updateUser: () => {},
-});
-
-function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<UserType | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [authError, setAuthError] = useState<string | null>(null);
-
-  useEffect(() => {
-    // Test connection to Firestore
-    async function testConnection() {
-      try {
-        await getDocFromServer(doc(db, 'test', 'connection'));
-      } catch (error) {
-        if(error instanceof Error && error.message.includes('the client is offline')) {
-          console.error("Please check your Firebase configuration. ");
-        }
-      }
-    }
-    testConnection();
-
-    console.log("AuthProvider: Iniciando monitoramento...");
-    
-    const unsubscribeAuth = onAuthStateChanged(auth, (firebaseUser) => {
-      if (firebaseUser) {
-        console.log("AuthProvider: Autenticado no Firebase Auth:", firebaseUser.uid);
-        
-        const userDocRef = doc(db, "users", firebaseUser.uid);
-        const unsubscribeDoc = onSnapshot(userDocRef, (docSnap) => {
-          if (docSnap.exists()) {
-            const userData = docSnap.data() as UserType;
-            if (userData.blocked) {
-              console.warn("AuthProvider: Usuário bloqueado.");
-              signOut(auth);
-              setUser(null);
-              alert("Sua conta foi bloqueada. Entre em contato com o administrador.");
-            } else {
-              console.log("AuthProvider: Perfil encontrado no Firestore.");
-              setUser({ id: firebaseUser.uid, ...userData });
-              setAuthError(null);
-            }
-          } else {
-            console.warn("AuthProvider: Perfil ainda não existe no Firestore.");
-            setUser(null);
-          }
-          setLoading(false);
-        }, (error) => {
-          handleFirestoreError(error, OperationType.GET, `users/${firebaseUser.uid}`);
-        });
-
-        return () => unsubscribeDoc();
-      } else {
-        console.log("AuthProvider: Nenhum usuário logado.");
-        setUser(null);
-        setLoading(false);
-      }
-    }, (error) => {
-      console.error("AuthProvider: Erro no Auth State:", error);
-      setAuthError(`Erro de Autenticação: ${error.message}`);
-      setLoading(false);
-    });
-
-    return () => unsubscribeAuth();
-  }, []);
-
-  const logout = async () => {
-    try {
-      await signOut(auth);
-    } catch (error) {
-      console.error("Erro ao deslogar:", error);
-    }
-  };
-
-  const updateUser = (data: Partial<UserType>) => {
-    if (user) {
-      setUser({ ...user, ...data });
-    }
-  };
-
-  return (
-    <AuthContext.Provider value={{ user, loading, logout, updateUser }}>
-      {authError && (
-        <div className="fixed top-0 left-0 right-0 bg-red-600 text-white p-2 text-center text-xs z-[9999]">
-          {authError} - Tente atualizar a página.
-        </div>
-      )}
-      {children}
-    </AuthContext.Provider>
-  );
-}
-
-function useAuth() {
-  return useContext(AuthContext);
-}
 
 function Login() {
   const [isLogin, setIsLogin] = useState(true);
@@ -244,7 +128,7 @@ function Login() {
           role,
           profileCompleted: false,
           createdAt: new Date().toISOString(),
-          ...(role === "personal" && { personalCode: newPersonalCode })
+          ...(role === "personal" ? { personalCode: newPersonalCode } : (personalCode.trim() ? { personalCode: personalCode.trim().toUpperCase() } : {}))
         });
 
         if (foundPersonalId) {
@@ -1086,18 +970,19 @@ function WorkoutBuilder({ client, onBack, existingWorkout, personalOverrideId }:
 function ClientStatistics({ clientId, onBack }: { clientId: string, onBack: () => void }) {
   const [workouts, setWorkouts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [period, setPeriod] = useState<"week" | "month" | "custom">("week");
+  const [customStart, setCustomStart] = useState(new Date(new Date().setDate(new Date().getDate() - 30)).toISOString().split('T')[0]);
+  const [customEnd, setCustomEnd] = useState(new Date().toISOString().split('T')[0]);
 
   useEffect(() => {
     const fetchWorkouts = async () => {
       try {
         const q = query(
           collection(db, "workouts"),
-          where("client_id", "==", clientId),
-          where("status", "==", "completed")
+          where("client_id", "==", clientId)
         );
         const snapshot = await getDocs(q);
         const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        data.sort((a: any, b: any) => new Date(b.completedAt).getTime() - new Date(a.completedAt).getTime());
         setWorkouts(data);
       } catch (error) {
         console.error("Error fetching statistics:", error);
@@ -1114,9 +999,36 @@ function ClientStatistics({ clientId, onBack }: { clientId: string, onBack: () =
     return `${m}m ${s}s`;
   };
 
-  const totalWorkouts = workouts.length;
-  const totalDuration = workouts.reduce((acc, w) => acc + (w.duration || 0), 0);
-  const avgDuration = totalWorkouts > 0 ? Math.floor(totalDuration / totalWorkouts) : 0;
+  const getFilteredWorkouts = () => {
+    const now = new Date();
+    let start = new Date();
+    let end = new Date();
+
+    if (period === "week") {
+      start.setDate(now.getDate() - now.getDay());
+      start.setHours(0, 0, 0, 0);
+      end.setDate(start.getDate() + 6);
+      end.setHours(23, 59, 59, 999);
+    } else if (period === "month") {
+      start = new Date(now.getFullYear(), now.getMonth(), 1);
+      end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+    } else {
+      start = new Date(customStart + "T00:00:00");
+      end = new Date(customEnd + "T23:59:59");
+    }
+
+    return workouts.filter(w => {
+      const wDate = new Date(w.date);
+      return wDate >= start && wDate <= end;
+    });
+  };
+
+  const filteredWorkouts = getFilteredWorkouts();
+  const completedWorkouts = filteredWorkouts.filter(w => w.status === "completed");
+  const pendingWorkouts = filteredWorkouts.filter(w => w.status !== "completed");
+  
+  const totalDuration = completedWorkouts.reduce((acc, w) => acc + (w.duration || 0), 0);
+  const avgDuration = completedWorkouts.length > 0 ? Math.floor(totalDuration / completedWorkouts.length) : 0;
 
   if (loading) {
     return (
@@ -1128,34 +1040,82 @@ function ClientStatistics({ clientId, onBack }: { clientId: string, onBack: () =
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div className="bg-neutral-900 p-4 rounded-2xl border border-white/10 shadow-xl flex flex-wrap items-center gap-4">
+        <div className="flex bg-neutral-800 p-1 rounded-xl border border-white/5">
+          <button 
+            onClick={() => setPeriod("week")}
+            className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${period === "week" ? "bg-orange-600 text-white shadow-lg" : "text-neutral-500 hover:text-white"}`}
+          >
+            Semana
+          </button>
+          <button 
+            onClick={() => setPeriod("month")}
+            className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${period === "month" ? "bg-orange-600 text-white shadow-lg" : "text-neutral-500 hover:text-white"}`}
+          >
+            Mês
+          </button>
+          <button 
+            onClick={() => setPeriod("custom")}
+            className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${period === "custom" ? "bg-orange-600 text-white shadow-lg" : "text-neutral-500 hover:text-white"}`}
+          >
+            Personalizado
+          </button>
+        </div>
+
+        {period === "custom" && (
+          <div className="flex items-center gap-2">
+            <input 
+              type="date" 
+              value={customStart}
+              onChange={(e) => setCustomStart(e.target.value)}
+              className="bg-neutral-800 border border-white/5 rounded-lg px-3 py-1.5 text-xs text-white outline-none focus:ring-1 focus:ring-orange-500"
+            />
+            <span className="text-neutral-500 text-xs">até</span>
+            <input 
+              type="date" 
+              value={customEnd}
+              onChange={(e) => setCustomEnd(e.target.value)}
+              className="bg-neutral-800 border border-white/5 rounded-lg px-3 py-1.5 text-xs text-white outline-none focus:ring-1 focus:ring-orange-500"
+            />
+          </div>
+        )}
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-neutral-900 p-6 rounded-2xl border border-white/10 shadow-xl">
-          <p className="text-neutral-500 text-xs font-bold uppercase tracking-widest mb-1">Total de Treinos</p>
-          <p className="text-3xl font-black text-white">{totalWorkouts}</p>
+          <p className="text-neutral-500 text-[10px] font-bold uppercase tracking-widest mb-1">Concluídos</p>
+          <p className="text-3xl font-black text-emerald-500">{completedWorkouts.length}</p>
         </div>
         <div className="bg-neutral-900 p-6 rounded-2xl border border-white/10 shadow-xl">
-          <p className="text-neutral-500 text-xs font-bold uppercase tracking-widest mb-1">Tempo Total</p>
+          <p className="text-neutral-500 text-[10px] font-bold uppercase tracking-widest mb-1">Não Concluídos</p>
+          <p className="text-3xl font-black text-red-500">{pendingWorkouts.length}</p>
+        </div>
+        <div className="bg-neutral-900 p-6 rounded-2xl border border-white/10 shadow-xl">
+          <p className="text-neutral-500 text-[10px] font-bold uppercase tracking-widest mb-1">Tempo Total</p>
           <p className="text-3xl font-black text-orange-500">{formatDuration(totalDuration)}</p>
         </div>
         <div className="bg-neutral-900 p-6 rounded-2xl border border-white/10 shadow-xl">
-          <p className="text-neutral-500 text-xs font-bold uppercase tracking-widest mb-1">Média por Treino</p>
-          <p className="text-3xl font-black text-emerald-500">{formatDuration(avgDuration)}</p>
+          <p className="text-neutral-500 text-[10px] font-bold uppercase tracking-widest mb-1">Média por Treino</p>
+          <p className="text-3xl font-black text-white">{formatDuration(avgDuration)}</p>
         </div>
       </div>
 
       <div className="bg-neutral-900 rounded-2xl border border-white/10 shadow-2xl overflow-hidden">
-        <div className="p-6 border-b border-white/5">
-          <h3 className="text-lg font-bold text-white">Consistência de Tempo</h3>
+        <div className="p-6 border-b border-white/5 flex items-center justify-between">
+          <h3 className="text-lg font-bold text-white">Consistência no Período</h3>
+          <span className="text-[10px] text-neutral-500 font-bold uppercase tracking-widest">
+            {completedWorkouts.length} de {filteredWorkouts.length} treinos realizados
+          </span>
         </div>
         <div className="p-6">
-          {workouts.length === 0 ? (
-            <p className="text-neutral-500 text-center py-8">Nenhum dado de treino concluído disponível.</p>
+          {completedWorkouts.length === 0 ? (
+            <p className="text-neutral-500 text-center py-8">Nenhum treino concluído neste período.</p>
           ) : (
             <div className="space-y-4">
-              {workouts.map((w, i) => (
+              {completedWorkouts.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()).map((w, i) => (
                 <div key={w.id} className="flex items-center gap-4">
                   <div className="text-xs text-neutral-500 font-mono w-20">
-                    {new Date(w.completedAt).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}
+                    {new Date(w.date + "T12:00:00").toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}
                   </div>
                   <div className="flex-1 h-3 bg-neutral-800 rounded-full overflow-hidden">
                     <div 
@@ -3520,11 +3480,46 @@ function SuperAdminDashboard() {
   const [isSending, setIsSending] = useState(false);
   const [editingUser, setEditingUser] = useState<UserType | null>(null);
   const [impersonatedUser, setImpersonatedUser] = useState<UserType | null>(null);
+  const [activeTab, setActiveTab] = useState<"users" | "hierarchy" | "messages">("users");
+  const [connections, setConnections] = useState<any[]>([]);
 
   useEffect(() => {
     fetchUsers();
     fetchSystemMessages();
+    fetchConnections();
   }, []);
+
+  const refreshData = () => {
+    fetchUsers();
+    fetchConnections();
+    fetchSystemMessages();
+  };
+
+  const fetchConnections = async () => {
+    try {
+      const q = query(collection(db, "connections"));
+      const snapshot = await getDocs(q);
+      const connectionsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setConnections(connectionsData);
+    } catch (error) {
+      console.error("Error fetching connections:", error);
+    }
+  };
+
+  const disconnectClient = async (personalId: string, clientId: string) => {
+    if (!window.confirm("Deseja realmente desvincular este aluno deste personal?")) return;
+    try {
+      const q = query(collection(db, "connections"), where("personal_id", "==", personalId), where("client_id", "==", clientId));
+      const snapshot = await getDocs(q);
+      const deletePromises = snapshot.docs.map(doc => deleteDoc(doc.ref));
+      await Promise.all(deletePromises);
+      alert("Aluno desvinculado com sucesso!");
+      fetchConnections();
+    } catch (error) {
+      console.error("Error disconnecting client:", error);
+      alert("Erro ao desvincular aluno.");
+    }
+  };
 
   const fetchSystemMessages = async () => {
     const q = query(collection(db, "system_messages"), orderBy("createdAt", "desc"));
@@ -3666,208 +3661,322 @@ function SuperAdminDashboard() {
           <p className="text-neutral-500 text-sm">Gerencie todos os usuários e permissões do sistema.</p>
         </div>
         <button 
-          onClick={fetchUsers}
+          onClick={refreshData}
           className="p-2 bg-neutral-900 hover:bg-neutral-800 rounded-xl border border-white/5 transition-colors"
         >
           <RefreshCw className={`w-5 h-5 text-orange-500 ${loading ? 'animate-spin' : ''}`} />
         </button>
       </div>
 
-      {/* Global Messaging */}
-      <div className="bg-neutral-900 p-6 rounded-2xl border border-white/10 shadow-2xl space-y-4">
-        <div className="flex items-center justify-between mb-2">
-          <div className="flex items-center gap-3">
-            <Send className="w-5 h-5 text-orange-500" />
-            <h3 className="text-lg font-bold text-white">Enviar Mensagem Global</h3>
-          </div>
-          <button 
-            onClick={clearAllSystemMessages}
-            disabled={isSending || systemMessages.length === 0}
-            className="text-xs text-red-500 hover:text-red-400 font-bold flex items-center gap-1 transition-colors"
-          >
-            <Trash2 className="w-3 h-3" />
-            Limpar Todas
-          </button>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <select 
-            value={messageTarget}
-            onChange={(e) => setMessageTarget(e.target.value as any)}
-            className="bg-neutral-800 border border-white/5 text-white text-sm rounded-xl px-4 py-3 focus:ring-orange-500 outline-none"
-          >
-            <option value="all">Todos os Usuários</option>
-            <option value="personal">Apenas Personals</option>
-            <option value="client">Apenas Alunos</option>
-          </select>
-          <input 
-            type="text"
-            placeholder="Digite o aviso..."
-            value={globalMessage}
-            onChange={(e) => setGlobalMessage(e.target.value)}
-            className="md:col-span-2 bg-neutral-800 border border-white/5 rounded-xl px-4 py-3 text-white focus:ring-orange-500 outline-none"
-          />
-          <div className="flex gap-2">
-            <div className="flex-1 relative">
-              <input 
-                type="number"
-                min="1"
-                max="99"
-                value={maxViews}
-                onChange={(e) => setMaxViews(parseInt(e.target.value) || 1)}
-                className="w-full bg-neutral-800 border border-white/5 rounded-xl px-4 py-3 text-white focus:ring-orange-500 outline-none text-center"
-                title="Número de vezes que a mensagem aparecerá para cada usuário"
-              />
-              <span className="absolute -top-2 left-3 bg-neutral-900 px-1 text-[10px] text-neutral-500 font-bold uppercase">Exibições</span>
-            </div>
-            <button 
-              onClick={() => sendSystemMessage(messageTarget, globalMessage)}
-              disabled={isSending || !globalMessage.trim()}
-              className="bg-orange-600 hover:bg-orange-500 text-white px-6 py-3 rounded-xl font-bold transition-all disabled:opacity-50 flex-1"
-            >
-              Enviar
-            </button>
-          </div>
-        </div>
+      <div className="flex bg-neutral-900 p-1 rounded-xl border border-white/5 w-fit">
+        <button 
+          onClick={() => setActiveTab("users")}
+          className={`px-6 py-2 rounded-lg text-xs font-bold transition-all ${activeTab === "users" ? "bg-orange-600 text-white shadow-lg" : "text-neutral-500 hover:text-white"}`}
+        >
+          Usuários
+        </button>
+        <button 
+          onClick={() => setActiveTab("hierarchy")}
+          className={`px-6 py-2 rounded-lg text-xs font-bold transition-all ${activeTab === "hierarchy" ? "bg-orange-600 text-white shadow-lg" : "text-neutral-500 hover:text-white"}`}
+        >
+          Hierarquia
+        </button>
+        <button 
+          onClick={() => setActiveTab("messages")}
+          className={`px-6 py-2 rounded-lg text-xs font-bold transition-all ${activeTab === "messages" ? "bg-orange-600 text-white shadow-lg" : "text-neutral-500 hover:text-white"}`}
+        >
+          Mensagens
+        </button>
       </div>
 
-      {/* Active System Messages */}
-      <div className="bg-neutral-900 rounded-2xl border border-white/10 shadow-2xl overflow-hidden">
-        <div className="p-6 border-b border-white/5 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <FileText className="w-5 h-5 text-orange-500" />
-            <h3 className="text-lg font-bold text-white">Mensagens do Sistema Ativas</h3>
-          </div>
-          <span className="bg-orange-600/20 text-orange-500 text-[10px] font-bold px-2 py-1 rounded-full uppercase tracking-widest">
-            {systemMessages.filter(m => m.active).length} Ativas
-          </span>
-        </div>
-        <div className="divide-y divide-white/5">
-          {systemMessages.length === 0 ? (
-            <div className="p-12 text-center text-neutral-500">
-              Nenhuma mensagem enviada.
+      {activeTab === "messages" && (
+        <div className="space-y-6">
+          {/* Global Messaging */}
+          <div className="bg-neutral-900 p-6 rounded-2xl border border-white/10 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-3">
+                <Send className="w-5 h-5 text-orange-500" />
+                <h3 className="text-lg font-bold text-white">Enviar Mensagem Global</h3>
+              </div>
+              <button 
+                onClick={clearAllSystemMessages}
+                disabled={isSending || systemMessages.length === 0}
+                className="text-xs text-red-500 hover:text-red-400 font-bold flex items-center gap-1 transition-colors"
+              >
+                <Trash2 className="w-3 h-3" />
+                Limpar Todas
+              </button>
             </div>
-          ) : (
-            systemMessages.map((msg) => (
-              <div key={msg.id} className="p-4 flex items-center justify-between hover:bg-white/5 transition-colors">
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2">
-                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase ${
-                      msg.target === 'all' ? 'bg-blue-500/20 text-blue-400' :
-                      msg.target === 'personal' ? 'bg-emerald-500/20 text-emerald-400' :
-                      'bg-purple-500/20 text-purple-400'
-                    }`}>
-                      {msg.target === 'all' ? 'Todos' : msg.target === 'personal' ? 'Personals' : 'Alunos'}
-                    </span>
-                    <span className="text-[10px] text-neutral-500">
-                      {msg.createdAt?.toDate ? msg.createdAt.toDate().toLocaleString('pt-BR') : 'Recentemente'}
-                    </span>
-                    {msg.maxViews && (
-                      <span className="text-[10px] text-orange-500/70 font-bold">
-                        • {msg.maxViews} {msg.maxViews === 1 ? 'exibição' : 'exibições'}
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-sm text-white">{msg.text}</p>
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <select 
+                value={messageTarget}
+                onChange={(e) => setMessageTarget(e.target.value as any)}
+                className="bg-neutral-800 border border-white/5 text-white text-sm rounded-xl px-4 py-3 focus:ring-orange-500 outline-none"
+              >
+                <option value="all">Todos os Usuários</option>
+                <option value="personal">Apenas Personals</option>
+                <option value="client">Apenas Alunos</option>
+              </select>
+              <input 
+                type="text"
+                placeholder="Digite o aviso..."
+                value={globalMessage}
+                onChange={(e) => setGlobalMessage(e.target.value)}
+                className="md:col-span-2 bg-neutral-800 border border-white/5 rounded-xl px-4 py-3 text-white focus:ring-orange-500 outline-none"
+              />
+              <div className="flex gap-2">
+                <div className="flex-1 relative">
+                  <input 
+                    type="number"
+                    min="1"
+                    max="99"
+                    value={maxViews}
+                    onChange={(e) => setMaxViews(parseInt(e.target.value) || 1)}
+                    className="w-full bg-neutral-800 border border-white/5 rounded-xl px-4 py-3 text-white focus:ring-orange-500 outline-none text-center"
+                    title="Número de vezes que a mensagem aparecerá para cada usuário"
+                  />
+                  <span className="absolute -top-2 left-3 bg-neutral-900 px-1 text-[10px] text-neutral-500 font-bold uppercase">Exibições</span>
                 </div>
                 <button 
-                  onClick={() => deleteSystemMessage(msg.id)}
-                  className="p-2 text-neutral-500 hover:text-red-500 hover:bg-red-500/10 rounded-xl transition-all"
+                  onClick={() => sendSystemMessage(messageTarget, globalMessage)}
+                  disabled={isSending || !globalMessage.trim()}
+                  className="bg-orange-600 hover:bg-orange-500 text-white px-6 py-3 rounded-xl font-bold transition-all disabled:opacity-50 flex-1"
                 >
-                  <Trash2 className="w-4 h-4" />
+                  Enviar
                 </button>
               </div>
-            ))
-          )}
-        </div>
-      </div>
+            </div>
+          </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <div className="bg-neutral-900 p-4 rounded-2xl border border-white/10">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-neutral-500" />
-            <input
-              type="text"
-              placeholder="Buscar por nome ou email..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full bg-neutral-800 border border-white/5 rounded-xl pl-10 pr-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-orange-500 transition-all"
-            />
+          {/* Active System Messages */}
+          <div className="bg-neutral-900 rounded-2xl border border-white/10 shadow-2xl overflow-hidden">
+            <div className="p-6 border-b border-white/5 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <FileText className="w-5 h-5 text-orange-500" />
+                <h3 className="text-lg font-bold text-white">Mensagens do Sistema Ativas</h3>
+              </div>
+              <span className="bg-orange-600/20 text-orange-500 text-[10px] font-bold px-2 py-1 rounded-full uppercase tracking-widest">
+                {systemMessages.filter(m => m.active).length} Ativas
+              </span>
+            </div>
+            <div className="divide-y divide-white/5">
+              {systemMessages.length === 0 ? (
+                <div className="p-12 text-center text-neutral-500">
+                  Nenhuma mensagem enviada.
+                </div>
+              ) : (
+                systemMessages.map((msg) => (
+                  <div key={msg.id} className="p-4 flex items-center justify-between hover:bg-white/5 transition-colors">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase ${
+                          msg.target === 'all' ? 'bg-blue-500/20 text-blue-400' :
+                          msg.target === 'personal' ? 'bg-emerald-500/20 text-emerald-400' :
+                          'bg-purple-500/20 text-purple-400'
+                        }`}>
+                          {msg.target === 'all' ? 'Todos' : msg.target === 'personal' ? 'Personals' : 'Alunos'}
+                        </span>
+                        <span className="text-[10px] text-neutral-500">
+                          {msg.createdAt?.toDate ? msg.createdAt.toDate().toLocaleString('pt-BR') : 'Recentemente'}
+                        </span>
+                        {msg.maxViews && (
+                          <span className="text-[10px] text-orange-500/70 font-bold">
+                            • {msg.maxViews} {msg.maxViews === 1 ? 'exibição' : 'exibições'}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-sm text-white">{msg.text}</p>
+                    </div>
+                    <button 
+                      onClick={() => deleteSystemMessage(msg.id)}
+                      className="p-2 text-neutral-500 hover:text-red-500 hover:bg-red-500/10 rounded-xl transition-all"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
           </div>
         </div>
-        <div className="bg-neutral-900 p-4 rounded-2xl border border-white/10 flex items-center gap-3">
-          <span className="text-xs font-bold text-neutral-500 uppercase tracking-widest whitespace-nowrap">Filtrar:</span>
-          <div className="flex bg-neutral-800 p-1 rounded-lg border border-white/5 w-full">
-            {(["all", "personal", "client", "superadmin"] as const).map((r) => (
-              <button
-                key={r}
-                onClick={() => setFilterRole(r)}
-                className={`flex-1 py-1.5 text-[10px] font-bold uppercase rounded-md transition-all ${
-                  filterRole === r ? "bg-orange-600 text-white shadow-lg" : "text-neutral-500 hover:text-white"
-                }`}
-              >
-                {r === "all" ? "Todos" : r === "client" ? "Alunos" : r}
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
+      )}
 
-      {loading ? (
-        <div className="flex flex-col items-center justify-center py-20">
-          <div className="w-10 h-10 border-4 border-orange-500/20 border-t-orange-500 rounded-full animate-spin mb-4"></div>
-          <p className="text-neutral-500 text-sm animate-pulse">Carregando usuários...</p>
-        </div>
-      ) : (
-        <div className="space-y-8">
-          {/* Personals Section */}
-          {(filterRole === "all" || filterRole === "personal") && personals.length > 0 && (
-            <UserTable 
-              title="Personals" 
-              users={personals} 
-              onUpdateRole={updateUserRole} 
+      {activeTab === "users" && (
+        <div className="space-y-6">
+          {editingUser ? (
+            <AdminUserEditView 
+              user={editingUser}
+              onClose={() => setEditingUser(null)}
+              onUpdateRole={updateUserRole}
               onToggleBlock={toggleBlockUser}
               onSendMessage={(id) => {
                 const text = prompt("Digite a mensagem para este usuário:");
                 if (text) sendSystemMessage(id, text);
               }}
               onImpersonate={setImpersonatedUser}
-              icon={<Users className="w-5 h-5 text-blue-400" />}
             />
-          )}
+          ) : (
+            <>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="bg-neutral-900 p-4 rounded-2xl border border-white/10">
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-neutral-500" />
+                    <input
+                      type="text"
+                      placeholder="Buscar por nome ou email..."
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      className="w-full bg-neutral-800 border border-white/5 rounded-xl pl-10 pr-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-orange-500 transition-all"
+                    />
+                  </div>
+                </div>
+                <div className="bg-neutral-900 p-4 rounded-2xl border border-white/10 flex items-center gap-3">
+                  <span className="text-xs font-bold text-neutral-500 uppercase tracking-widest whitespace-nowrap">Filtrar:</span>
+                  <div className="flex bg-neutral-800 p-1 rounded-lg border border-white/5 w-full">
+                    {(["all", "personal", "client", "superadmin"] as const).map((r) => (
+                      <button
+                        key={r}
+                        onClick={() => setFilterRole(r)}
+                        className={`flex-1 py-1.5 text-[10px] font-bold uppercase rounded-md transition-all ${
+                          filterRole === r ? "bg-orange-600 text-white shadow-lg" : "text-neutral-500 hover:text-white"
+                        }`}
+                      >
+                        {r === "all" ? "Todos" : r === "client" ? "Alunos" : r}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
 
-          {/* Clients Section */}
-          {(filterRole === "all" || filterRole === "client") && clients.length > 0 && (
-            <UserTable 
-              title="Alunos" 
-              users={clients} 
-              onUpdateRole={updateUserRole} 
-              onToggleBlock={toggleBlockUser}
-              onSendMessage={(id) => {
-                const text = prompt("Digite a mensagem para este usuário:");
-                if (text) sendSystemMessage(id, text);
-              }}
-              onImpersonate={setImpersonatedUser}
-              icon={<Dumbbell className="w-5 h-5 text-emerald-400" />}
-            />
-          )}
+              {loading ? (
+                <div className="flex flex-col items-center justify-center py-20">
+                  <div className="w-10 h-10 border-4 border-orange-500/20 border-t-orange-500 rounded-full animate-spin mb-4"></div>
+                  <p className="text-neutral-500 text-sm animate-pulse">Carregando usuários...</p>
+                </div>
+              ) : (
+                <div className="space-y-8">
+                  {/* Personals Section */}
+                  {(filterRole === "all" || filterRole === "personal") && personals.length > 0 && (
+                    <UserTable 
+                      title="Personals" 
+                      users={personals} 
+                      onEdit={setEditingUser}
+                      icon={<Users className="w-5 h-5 text-blue-400" />}
+                    />
+                  )}
 
-          {/* Admins Section */}
-          {(filterRole === "all" || filterRole === "superadmin") && admins.length > 0 && (
-            <UserTable 
-              title="Administradores" 
-              users={admins} 
-              onUpdateRole={null} 
-              onToggleBlock={null}
-              onSendMessage={null}
-              onImpersonate={null}
-              icon={<Activity className="w-5 h-5 text-purple-400" />}
-            />
-          )}
+                  {/* Clients Section */}
+                  {(filterRole === "all" || filterRole === "client") && clients.length > 0 && (
+                    <UserTable 
+                      title="Alunos" 
+                      users={clients} 
+                      onEdit={setEditingUser}
+                      icon={<Dumbbell className="w-5 h-5 text-emerald-400" />}
+                    />
+                  )}
 
-          {filteredUsers.length === 0 && (
-            <div className="bg-neutral-900 p-12 rounded-2xl border border-white/10 text-center">
-              <Search className="w-12 h-12 text-neutral-700 mx-auto mb-4" />
-              <p className="text-neutral-500">Nenhum usuário encontrado com os filtros atuais.</p>
+                  {/* Admins Section */}
+                  {(filterRole === "all" || filterRole === "superadmin") && admins.length > 0 && (
+                    <UserTable 
+                      title="Administradores" 
+                      users={admins} 
+                      onEdit={setEditingUser}
+                      icon={<Activity className="w-5 h-5 text-purple-400" />}
+                    />
+                  )}
+
+                  {filteredUsers.length === 0 && (
+                    <div className="bg-neutral-900 p-12 rounded-2xl border border-white/10 text-center">
+                      <Search className="w-12 h-12 text-neutral-700 mx-auto mb-4" />
+                      <p className="text-neutral-500">Nenhum usuário encontrado com os filtros atuais.</p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+
+      {activeTab === "hierarchy" && (
+        <div className="space-y-6">
+          {loading ? (
+            <div className="flex flex-col items-center justify-center py-20">
+              <div className="w-10 h-10 border-4 border-orange-500/20 border-t-orange-500 rounded-full animate-spin mb-4"></div>
+              <p className="text-neutral-500 text-sm animate-pulse">Carregando hierarquia...</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 gap-6">
+              {users.filter(u => u.role === "personal").map(personal => {
+                const personalConnections = connections.filter(c => c.personal_id === personal.id);
+                const associatedClients = users.filter(u => u.role === "client" && personalConnections.some(c => c.client_id === u.id));
+                return (
+                  <div key={personal.id} className="bg-neutral-900 rounded-2xl border border-white/10 overflow-hidden shadow-xl">
+                    <div className="p-6 bg-neutral-800/50 border-b border-white/5 flex items-center justify-between">
+                      <div className="flex items-center gap-4">
+                        {personal.photoUrl ? (
+                          <img src={personal.photoUrl} alt="" className="w-12 h-12 rounded-full object-cover border-2 border-blue-500/50" />
+                        ) : (
+                          <div className="w-12 h-12 bg-blue-500/10 rounded-full flex items-center justify-center text-blue-500 font-bold text-lg border-2 border-blue-500/20">
+                            {personal.name?.charAt(0).toUpperCase()}
+                          </div>
+                        )}
+                        <div>
+                          <h3 className="text-xl font-bold text-white">{personal.name}</h3>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs text-neutral-500">{personal.email}</span>
+                            <span className="bg-blue-500/10 text-blue-400 text-[10px] font-bold px-2 py-0.5 rounded-full border border-blue-500/20">
+                              Código: {personal.personalCode}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-2xl font-black text-white">{associatedClients.length}</div>
+                        <div className="text-[10px] text-neutral-500 uppercase font-bold tracking-widest">Alunos</div>
+                      </div>
+                    </div>
+                    <div className="p-4">
+                      {associatedClients.length === 0 ? (
+                        <div className="py-8 text-center text-neutral-600 italic text-sm">
+                          Nenhum aluno associado a este personal.
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                          {associatedClients.map(client => (
+                            <div key={client.id} className="bg-neutral-800/30 p-3 rounded-xl border border-white/5 flex items-center gap-3 hover:bg-neutral-800/50 transition-colors">
+                              {client.photoUrl ? (
+                                <img src={client.photoUrl} alt="" className="w-8 h-8 rounded-full object-cover" />
+                              ) : (
+                                <div className="w-8 h-8 bg-emerald-500/10 rounded-full flex items-center justify-center text-emerald-500 font-bold text-xs">
+                                  {client.name?.charAt(0).toUpperCase()}
+                                </div>
+                              )}
+                              <div className="min-w-0 flex-1">
+                                <div className="text-sm font-bold text-white truncate">{client.name}</div>
+                                <div className="text-[10px] text-neutral-500 truncate">{client.email}</div>
+                              </div>
+                              <button
+                                onClick={() => disconnectClient(personal.id, client.id)}
+                                className="p-2 text-neutral-500 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all"
+                                title="Desvincular Aluno"
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+              {users.filter(u => u.role === "personal").length === 0 && (
+                <div className="bg-neutral-900 p-12 rounded-2xl border border-white/10 text-center">
+                  <Users className="w-12 h-12 text-neutral-700 mx-auto mb-4" />
+                  <p className="text-neutral-500">Nenhum personal cadastrado no sistema.</p>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -3876,13 +3985,10 @@ function SuperAdminDashboard() {
   );
 }
 
-function UserTable({ title, users, onUpdateRole, onToggleBlock, onSendMessage, onImpersonate, icon }: { 
+function UserTable({ title, users, onEdit, icon }: { 
   title: string, 
   users: UserType[], 
-  onUpdateRole: ((id: string, role: "personal" | "client") => void) | null,
-  onToggleBlock: ((id: string, current: boolean) => void) | null,
-  onSendMessage: ((id: string) => void) | null,
-  onImpersonate: ((user: UserType) => void) | null,
+  onEdit: (user: UserType) => void,
   icon: ReactNode 
 }) {
   return (
@@ -3902,7 +4008,7 @@ function UserTable({ title, users, onUpdateRole, onToggleBlock, onSendMessage, o
                 <th className="px-6 py-4">Usuário</th>
                 <th className="px-6 py-4">Role Atual</th>
                 <th className="px-6 py-4">Status</th>
-                <th className="px-6 py-4">Ações</th>
+                <th className="px-6 py-4 text-right">Ações</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-white/5">
@@ -3939,51 +4045,168 @@ function UserTable({ title, users, onUpdateRole, onToggleBlock, onSendMessage, o
                       {user.blocked ? 'Bloqueado' : 'Ativo'}
                     </span>
                   </td>
-                  <td className="px-6 py-4">
-                    <div className="flex items-center gap-2">
-                      {onUpdateRole && (
-                        <select 
-                          value={user.role}
-                          onChange={(e) => onUpdateRole(user.id, e.target.value as any)}
-                          className="bg-neutral-800 border border-white/5 text-white text-xs rounded-lg p-1.5 focus:ring-orange-500 outline-none"
-                        >
-                          <option value="client">Aluno</option>
-                          <option value="personal">Personal</option>
-                        </select>
-                      )}
-                      {onToggleBlock && (
-                        <button 
-                          onClick={() => onToggleBlock(user.id, !!user.blocked)}
-                          className={`p-2 rounded-lg transition-colors ${user.blocked ? 'text-emerald-500 hover:bg-emerald-500/10' : 'text-red-500 hover:bg-red-500/10'}`}
-                          title={user.blocked ? "Desbloquear" : "Bloquear"}
-                        >
-                          {user.blocked ? <CheckCircle2 className="w-4 h-4" /> : <X className="w-4 h-4" />}
-                        </button>
-                      )}
-                      {onSendMessage && (
-                        <button 
-                          onClick={() => onSendMessage(user.id)}
-                          className="p-2 text-orange-500 hover:bg-orange-500/10 rounded-lg transition-colors"
-                          title="Enviar Mensagem"
-                        >
-                          <MessageSquare className="w-4 h-4" />
-                        </button>
-                      )}
-                      {onImpersonate && (
-                        <button 
-                          onClick={() => onImpersonate(user)}
-                          className="p-2 text-blue-500 hover:bg-blue-500/10 rounded-lg transition-colors"
-                          title="Editar/Ver como Usuário"
-                        >
-                          <Edit2 className="w-4 h-4" />
-                        </button>
-                      )}
-                    </div>
+                  <td className="px-6 py-4 text-right">
+                    <button 
+                      onClick={() => onEdit(user)}
+                      className="p-2 text-neutral-400 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
+                      title="Editar / Ações"
+                    >
+                      <Edit2 className="w-4 h-4" />
+                    </button>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AdminUserEditView({ 
+  user, 
+  onClose, 
+  onUpdateRole, 
+  onToggleBlock, 
+  onSendMessage, 
+  onImpersonate 
+}: { 
+  user: UserType, 
+  onClose: () => void,
+  onUpdateRole: (id: string, role: "personal" | "client") => void,
+  onToggleBlock: (id: string, current: boolean) => void,
+  onSendMessage: (id: string) => void,
+  onImpersonate: (user: UserType) => void
+}) {
+  return (
+    <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-300">
+      <div className="flex items-center justify-between">
+        <button 
+          onClick={onClose}
+          className="flex items-center gap-2 text-neutral-500 hover:text-white transition-colors group"
+        >
+          <div className="p-2 rounded-xl bg-neutral-900 border border-white/5 group-hover:border-white/10">
+            <ArrowLeft className="w-4 h-4" />
+          </div>
+          <span className="text-sm font-bold uppercase tracking-widest">Voltar para Lista</span>
+        </button>
+        <div className="flex items-center gap-3">
+          <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest border ${
+            user.blocked ? 'bg-red-500/10 text-red-400 border-red-500/20' : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+          }`}>
+            {user.blocked ? 'Bloqueado' : 'Ativo'}
+          </span>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* User Info & Quick Actions */}
+        <div className="lg:col-span-1 space-y-6">
+          <div className="bg-neutral-900 p-6 rounded-3xl border border-white/10 shadow-2xl space-y-6">
+            <div className="flex flex-col items-center text-center space-y-4">
+              {user.photoUrl ? (
+                <img src={user.photoUrl} alt="" className="w-24 h-24 rounded-full object-cover border-4 border-orange-500/20 shadow-xl shadow-orange-500/10" />
+              ) : (
+                <div className="w-24 h-24 bg-orange-500/10 rounded-full flex items-center justify-center text-orange-500 font-bold text-3xl border-4 border-orange-500/20 shadow-xl shadow-orange-500/10">
+                  {user.name?.charAt(0).toUpperCase()}
+                </div>
+              )}
+              <div>
+                <h3 className="text-xl font-black text-white">{user.name}</h3>
+                <p className="text-neutral-500 text-sm">{user.email}</p>
+              </div>
+            </div>
+
+            <div className="space-y-3 pt-4 border-t border-white/5">
+              <div className="flex flex-col gap-2">
+                <label className="text-[10px] font-bold text-neutral-500 uppercase tracking-widest">Alterar Role</label>
+                <select 
+                  value={user.role}
+                  onChange={(e) => onUpdateRole(user.id, e.target.value as any)}
+                  className="w-full bg-neutral-800 border border-white/5 text-white text-sm rounded-xl px-4 py-3 focus:ring-orange-500 outline-none transition-all"
+                >
+                  <option value="client">Aluno</option>
+                  <option value="personal">Personal</option>
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <button 
+                  onClick={() => onToggleBlock(user.id, !!user.blocked)}
+                  className={`flex items-center justify-center gap-2 py-3 rounded-xl font-bold text-xs transition-all ${
+                    user.blocked 
+                    ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 hover:bg-emerald-500/20' 
+                    : 'bg-red-500/10 text-red-500 border border-red-500/20 hover:bg-red-500/20'
+                  }`}
+                >
+                  {user.blocked ? <CheckCircle2 className="w-4 h-4" /> : <XCircle className="w-4 h-4" />}
+                  {user.blocked ? 'Desbloquear' : 'Bloquear'}
+                </button>
+                <button 
+                  onClick={() => onSendMessage(user.id)}
+                  className="flex items-center justify-center gap-2 py-3 bg-orange-500/10 text-orange-500 border border-orange-500/20 rounded-xl font-bold text-xs hover:bg-orange-500/20 transition-all"
+                >
+                  <MessageSquare className="w-4 h-4" />
+                  Mensagem
+                </button>
+              </div>
+
+              <button 
+                onClick={() => onImpersonate(user)}
+                className="w-full flex items-center justify-center gap-2 py-3 bg-blue-500/10 text-blue-500 border border-blue-500/20 rounded-xl font-bold text-xs hover:bg-blue-500/20 transition-all"
+              >
+                <User className="w-4 h-4" />
+                Ver como Usuário
+              </button>
+            </div>
+          </div>
+
+          {/* Additional Info */}
+          <div className="bg-neutral-900 p-6 rounded-3xl border border-white/10 shadow-2xl">
+            <h4 className="text-xs font-bold text-neutral-500 uppercase tracking-widest mb-4">Informações Adicionais</h4>
+            <div className="space-y-4">
+              <div className="flex justify-between items-center">
+                <span className="text-xs text-neutral-500">ID do Usuário</span>
+                <span className="text-xs font-mono text-white bg-white/5 px-2 py-1 rounded">{user.id.substring(0, 8)}...</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-xs text-neutral-500">Criado em</span>
+                <span className="text-xs text-white">{user.createdAt ? new Date(user.createdAt).toLocaleDateString('pt-BR') : 'N/A'}</span>
+              </div>
+              {user.role === 'personal' && (
+                <div className="flex justify-between items-center">
+                  <span className="text-xs text-neutral-500">Código Personal</span>
+                  <span className="text-xs font-bold text-orange-500">{user.personalCode || 'N/A'}</span>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Content Section (Workouts or Profile) */}
+        <div className="lg:col-span-2 space-y-6">
+          {user.role === 'client' ? (
+            <div className="bg-neutral-900 rounded-3xl border border-white/10 shadow-2xl overflow-hidden">
+              <div className="p-6 border-b border-white/5 flex items-center gap-3">
+                <Dumbbell className="w-5 h-5 text-orange-500" />
+                <h3 className="text-lg font-bold text-white">Treinos do Aluno</h3>
+              </div>
+              <div className="p-6">
+                <ClientWorkoutsTab userOverride={user} />
+              </div>
+            </div>
+          ) : (
+            <div className="bg-neutral-900 rounded-3xl border border-white/10 shadow-2xl overflow-hidden">
+              <div className="p-6 border-b border-white/5 flex items-center gap-3">
+                <User className="w-5 h-5 text-orange-500" />
+                <h3 className="text-lg font-bold text-white">Perfil do Personal</h3>
+              </div>
+              <div className="p-6">
+                <CompleteProfile isEditing={true} userOverride={user} />
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>
