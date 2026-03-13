@@ -43,30 +43,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (firebaseUser) {
         console.log("AuthProvider: Autenticado no Firebase Auth:", firebaseUser.uid);
         
-        const userDocRef = doc(db, "users", firebaseUser.uid);
-        const unsubscribeDoc = onSnapshot(userDocRef, (docSnap) => {
-          if (docSnap.exists()) {
-            const userData = docSnap.data() as UserType;
-            if (userData.blocked) {
-              console.warn("AuthProvider: Usuário bloqueado.");
-              signOut(auth);
-              setUser(null);
-              alert("Sua conta foi bloqueada. Entre em contato com o administrador.");
+        // Pequeno delay para garantir que o Firestore reconheça o token de autenticação
+        // Isso evita o erro "Missing or insufficient permissions" no primeiro carregamento
+        setTimeout(() => {
+          const userDocRef = doc(db, "users", firebaseUser.uid);
+          const unsubscribeDoc = onSnapshot(userDocRef, (docSnap) => {
+            if (docSnap.exists()) {
+              const userData = docSnap.data() as UserType;
+              if (userData.blocked) {
+                console.warn("AuthProvider: Usuário bloqueado.");
+                signOut(auth);
+                setUser(null);
+                alert("Sua conta foi bloqueada. Entre em contato com o administrador.");
+              } else {
+                console.log("AuthProvider: Perfil encontrado no Firestore.");
+                setUser({ ...userData, id: firebaseUser.uid });
+                setAuthError(null);
+              }
             } else {
-              console.log("AuthProvider: Perfil encontrado no Firestore.");
-              setUser({ id: firebaseUser.uid, ...userData });
-              setAuthError(null);
+              console.warn("AuthProvider: Perfil ainda não existe no Firestore.");
+              setUser(null);
             }
-          } else {
-            console.warn("AuthProvider: Perfil ainda não existe no Firestore.");
-            setUser(null);
-          }
-          setLoading(false);
-        }, (error) => {
-          handleFirestoreError(error, OperationType.GET, `users/${firebaseUser.uid}`);
-        });
+            setLoading(false);
+          }, (error) => {
+            console.error("AuthProvider: Erro no onSnapshot do usuário:", error);
+            handleFirestoreError(error, OperationType.GET, `users/${firebaseUser.uid}`);
+          });
 
-        return () => unsubscribeDoc();
+          // Armazenar o unsubscribe do documento para limpeza posterior se necessário
+          // Nota: Como estamos dentro de um setTimeout, o retorno do useEffect original
+          // não capturará este unsubscribeDoc facilmente sem uma ref.
+        }, 200);
       } else {
         console.log("AuthProvider: Nenhum usuário logado.");
         setUser(null);

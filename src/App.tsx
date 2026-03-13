@@ -115,7 +115,7 @@ function Login() {
           foundPersonalId = querySnapshot.docs[0].id;
         }
 
-        const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+        const userCredential = await createUserWithEmailAndPassword(auth, email.trim().toLowerCase(), password);
         const uid = userCredential.user.uid;
 
         let newPersonalCode = "";
@@ -125,7 +125,7 @@ function Login() {
 
         await setDoc(doc(db, "users", uid), {
           name,
-          email,
+          email: email.trim().toLowerCase(),
           gender,
           role,
           profileCompleted: false,
@@ -1673,6 +1673,7 @@ function PersonalDashboard() {
   const [clientTab, setClientTab] = useState<"workouts" | "history" | "assessments" | "statistics">("workouts");
   const [chatRoom, setChatRoom] = useState<{ id: string; name: string } | null>(null);
   const [inviteEmail, setInviteEmail] = useState("");
+  const [addMethod, setAddMethod] = useState<'existing' | 'invite'>('existing');
   const [isInviting, setIsInviting] = useState(false);
   const [inviteStatus, setInviteStatus] = useState<{ type: 'success' | 'error', message: string } | null>(null);
 
@@ -1726,15 +1727,15 @@ function PersonalDashboard() {
         where("personal_id", "==", user?.id),
         where("client_id", "==", clientId)
       );
-      const snapshot = await getDocs(q);
+      const snapshot = await getDocs(q).catch(err => handleFirestoreError(err, OperationType.GET, "connections"));
       
-      if (snapshot.empty) {
+      if (snapshot && snapshot.empty) {
         await addDoc(collection(db, "connections"), {
           personal_id: user?.id,
           client_id: clientId,
           status: "active",
           createdAt: new Date().toISOString()
-        });
+        }).catch(err => handleFirestoreError(err, OperationType.CREATE, "connections"));
         fetchClients();
         setShowAdd(false);
       }
@@ -1785,34 +1786,48 @@ function PersonalDashboard() {
     setInviteStatus(null);
 
     try {
-      // 1. Check if user already exists
-      const q = query(collection(db, "users"), where("email", "==", inviteEmail.trim().toLowerCase()));
-      const snapshot = await getDocs(q);
+      console.log("Enviando convite:", { addMethod, inviteEmail, userId: user.id });
+      if (addMethod === 'existing') {
+        // 1. Check if user already exists
+        const q = query(collection(db, "users"), where("email", "==", inviteEmail.trim().toLowerCase()));
+        const snapshot = await getDocs(q).catch(err => {
+          console.error("Erro ao buscar usuário:", err);
+          handleFirestoreError(err, OperationType.GET, "users");
+        });
 
-      if (!snapshot.empty) {
-        const clientUser = snapshot.docs[0];
-        if (clientUser.data().role !== 'client') {
-          setInviteStatus({ type: 'error', message: "Este email pertence a um Personal Trainer." });
-          setIsInviting(false);
-          return;
+        if (snapshot && !snapshot.empty) {
+          const clientUser = snapshot.docs[0];
+          console.log("Usuário encontrado:", clientUser.id);
+          if (clientUser.data().role !== 'client') {
+            setInviteStatus({ type: 'error', message: "Este email pertence a um Personal Trainer." });
+            setIsInviting(false);
+            return;
+          }
+          await addClient(clientUser.id);
+          setInviteStatus({ type: 'success', message: "Aluno encontrado e conectado com sucesso!" });
+        } else {
+          console.log("Usuário não encontrado");
+          setInviteStatus({ type: 'error', message: "Aluno não encontrado com este email. Use a opção 'Convidar Novo Aluno'." });
         }
-        await addClient(clientUser.id);
-        setInviteStatus({ type: 'success', message: "Aluno encontrado e conectado com sucesso!" });
       } else {
         // 2. Create a pending invitation
+        console.log("Criando convite pendente...");
         await addDoc(collection(db, "invitations"), {
           personal_id: user.id,
-          personal_name: user.displayName || user.name,
+          personal_name: user.displayName || user.name || "Personal",
           email: inviteEmail.trim().toLowerCase(),
           status: "pending",
           createdAt: new Date().toISOString()
+        }).catch(err => {
+          console.error("Erro ao criar convite:", err);
+          handleFirestoreError(err, OperationType.CREATE, "invitations");
         });
         setInviteStatus({ type: 'success', message: "Convite enviado para o email informado!" });
       }
       setInviteEmail("");
     } catch (err) {
-      console.error(err);
-      setInviteStatus({ type: 'error', message: "Erro ao enviar convite. Tente novamente." });
+      console.error("Erro geral no sendInvite:", err);
+      setInviteStatus({ type: 'error', message: "Erro ao enviar convite. Verifique as permissões ou tente novamente." });
     } finally {
       setIsInviting(false);
       setTimeout(() => setInviteStatus(null), 5000);
@@ -1936,12 +1951,28 @@ function PersonalDashboard() {
 
       {showAdd && (
         <div className="bg-neutral-900 p-6 rounded-2xl border border-white/10 shadow-2xl space-y-6">
-          <div>
-            <h3 className="text-lg font-medium text-white mb-4">Adicionar Aluno por Email</h3>
+          <div className="space-y-4">
+            <h3 className="text-lg font-medium text-white">Adicionar Aluno</h3>
+            
+            <div className="flex bg-neutral-800 p-1 rounded-xl border border-white/5">
+              <button
+                onClick={() => setAddMethod('existing')}
+                className={`flex-1 py-2 text-xs font-medium rounded-lg transition-all ${addMethod === 'existing' ? 'bg-orange-600 text-white shadow-lg' : 'text-neutral-400 hover:text-white'}`}
+              >
+                Email Cadastrado
+              </button>
+              <button
+                onClick={() => setAddMethod('invite')}
+                className={`flex-1 py-2 text-xs font-medium rounded-lg transition-all ${addMethod === 'invite' ? 'bg-orange-600 text-white shadow-lg' : 'text-neutral-400 hover:text-white'}`}
+              >
+                Convidar Novo Aluno
+              </button>
+            </div>
+
             <form onSubmit={sendInvite} className="flex gap-2">
               <input
                 type="email"
-                placeholder="email@aluno.com"
+                placeholder={addMethod === 'existing' ? "Email do aluno já cadastrado" : "Email para convite"}
                 value={inviteEmail}
                 onChange={(e) => setInviteEmail(e.target.value)}
                 className="flex-1 bg-neutral-800 border border-white/10 rounded-xl px-4 py-2 text-white focus:outline-none focus:ring-2 focus:ring-orange-500"
@@ -1953,7 +1984,7 @@ function PersonalDashboard() {
                 className="bg-orange-600 hover:bg-orange-500 text-white px-6 py-2 rounded-xl font-bold transition-all disabled:opacity-50 flex items-center gap-2"
               >
                 {isInviting ? <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div> : <Send className="w-4 h-4" />}
-                Enviar
+                {addMethod === 'existing' ? 'Adicionar' : 'Convidar'}
               </button>
             </form>
             {inviteStatus && (

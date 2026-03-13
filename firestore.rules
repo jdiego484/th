@@ -12,8 +12,10 @@ service cloud.firestore {
     
     function isAdmin() {
       return isAuthenticated() && 
-        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'superadmin' ||
-         (request.auth.token.email == "jdiego484@gmail.com" && request.auth.token.email_verified == true));
+        ((exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'superadmin') ||
+         (request.auth.token.email == "jdiego484@gmail.com" && request.auth.token.email_verified == true) ||
+         (request.auth.token.email == "jdiego484@hotmail.com" && request.auth.token.email_verified == true));
     }
     
     function isOwner(userId) {
@@ -35,15 +37,21 @@ service cloud.firestore {
     // Users Collection
     match /users/{userId} {
       allow read: if isAuthenticated();
-      allow create: if isOwner(userId) && hasRequiredFields(['name', 'email', 'role']);
-      allow update: if (isOwner(userId) && request.resource.data.role == resource.data.role) || isAdmin();
+      allow create: if isOwner(userId) && 
+                      hasRequiredFields(['name', 'email', 'role']) &&
+                      request.resource.data.name is string && request.resource.data.name.size() < 100 &&
+                      request.resource.data.email is string && request.resource.data.email.size() < 100;
+      allow update: if (isOwner(userId) && request.resource.data.role == resource.data.role &&
+                        (!('name' in request.resource.data) || (request.resource.data.name is string && request.resource.data.name.size() < 100))) || isAdmin();
       allow delete: if isAdmin();
     }
 
     // Connections Collection
     match /connections/{connectionId} {
       allow read, update: if isAuthenticated() && (request.auth.uid == resource.data.personal_id || request.auth.uid == resource.data.client_id || isAdmin());
-      allow create: if isAuthenticated() && (request.auth.uid == request.resource.data.personal_id || isAdmin()) && hasRequiredFields(['personal_id', 'client_id', 'status']);
+      allow create: if isAuthenticated() && (request.auth.uid == request.resource.data.personal_id || isAdmin()) && 
+                      hasRequiredFields(['personal_id', 'client_id', 'status']) &&
+                      request.resource.data.status in ['active', 'blocked'];
       allow delete: if isAdmin();
     }
 
@@ -61,19 +69,25 @@ service cloud.firestore {
 
     // Chats and Messages
     match /chats/{roomId} {
-      allow read: if isAuthenticated() && (request.auth.uid in roomId.split('_') || isAdmin());
+      allow read: if isAuthenticated() && (roomId.matches('.*' + request.auth.uid + '.*') || isAdmin());
       
       match /messages/{messageId} {
-        allow read: if isAuthenticated() && (request.auth.uid in roomId.split('_') || isAdmin());
-        allow create: if isAuthenticated() && (request.auth.uid == request.resource.data.senderId) && (request.auth.uid in roomId.split('_') || isAdmin());
+        allow read: if isAuthenticated() && (roomId.matches('.*' + request.auth.uid + '.*') || isAdmin());
+        allow create: if isAuthenticated() && 
+                        (request.auth.uid == request.resource.data.senderId) && 
+                        (roomId.matches('.*' + request.auth.uid + '.*') || isAdmin()) &&
+                        request.resource.data.text is string && request.resource.data.text.size() < 5000;
         allow update, delete: if isAdmin();
       }
     }
 
     // Invitations
     match /invitations/{invitationId} {
-      allow read: if isAuthenticated() && (request.auth.uid == resource.data.personal_id || request.auth.token.email == resource.data.email || isAdmin());
-      allow create, delete: if isAuthenticated() && (request.auth.uid == request.resource.data.personal_id || isAdmin());
+      allow read: if isAuthenticated() && (request.auth.uid == resource.data.personal_id || (request.auth.token.email != null && request.auth.token.email.lower() == resource.data.email.lower()) || isAdmin());
+      allow create: if isAuthenticated() && (request.auth.uid == request.resource.data.personal_id || isAdmin()) &&
+                      request.resource.data.status == 'pending' &&
+                      request.resource.data.email is string && request.resource.data.email.size() < 100;
+      allow delete: if isAuthenticated() && (request.auth.uid == resource.data.personal_id || isAdmin());
     }
 
     // System Messages
