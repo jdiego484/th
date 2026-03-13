@@ -1,7 +1,8 @@
-import { useState, useEffect, FormEvent } from "react";
+import { useState, useEffect, FormEvent, useRef, ChangeEvent } from "react";
 import { collection, query, where, getDocs, addDoc, orderBy } from "firebase/firestore";
-import { db } from "../firebase";
-import { ArrowLeft, Plus, Activity, LineChart as LineChartIcon, History, Scale, Ruler } from "lucide-react";
+import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
+import { db, storage } from "../firebase";
+import { ArrowLeft, Plus, Activity, LineChart as LineChartIcon, History, Scale, Ruler, Camera, Image as ImageIcon, Trash2, Eye, X } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 
 export function AssessmentView({ clientId, clientName, onBack, isPersonal }: { clientId: string, clientName: string, onBack: () => void, isPersonal: boolean }) {
@@ -21,6 +22,9 @@ export function AssessmentView({ clientId, clientName, onBack, isPersonal }: { c
   const [arms, setArms] = useState("");
   const [thighs, setThighs] = useState("");
   const [calves, setCalves] = useState("");
+  const [photos, setPhotos] = useState<{file: File, preview: string, type: string}[]>([]);
+  const [selectedPhotoIndex, setSelectedPhotoIndex] = useState<number | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     fetchAssessments();
@@ -38,10 +42,40 @@ export function AssessmentView({ clientId, clientName, onBack, isPersonal }: { c
     setAssessments(data);
   };
 
+  const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files) return;
+
+    const newPhotos = Array.from(files).map(file => ({
+      file,
+      preview: URL.createObjectURL(file),
+      type: "Geral" // Default type
+    }));
+
+    setPhotos([...photos, ...newPhotos]);
+  };
+
+  const removePhoto = (index: number) => {
+    const newPhotos = [...photos];
+    URL.revokeObjectURL(newPhotos[index].preview);
+    newPhotos.splice(index, 1);
+    setPhotos(newPhotos);
+  };
+
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
     try {
+      const uploadedPhotoUrls: string[] = [];
+
+      // Upload photos first
+      for (const photo of photos) {
+        const storageRef = ref(storage, `assessments/${clientId}/${Date.now()}_${photo.file.name}`);
+        const snapshot = await uploadBytes(storageRef, photo.file);
+        const url = await getDownloadURL(snapshot.ref);
+        uploadedPhotoUrls.push(url);
+      }
+
       await addDoc(collection(db, "assessments"), {
         client_id: clientId,
         date,
@@ -55,6 +89,7 @@ export function AssessmentView({ clientId, clientName, onBack, isPersonal }: { c
         arms: parseFloat(arms) || 0,
         thighs: parseFloat(thighs) || 0,
         calves: parseFloat(calves) || 0,
+        photos: uploadedPhotoUrls,
         createdAt: new Date().toISOString()
       });
       alert("Avaliação salva com sucesso!");
@@ -64,6 +99,7 @@ export function AssessmentView({ clientId, clientName, onBack, isPersonal }: { c
       // Reset form
       setWeight(""); setHeight(""); setBodyFat(""); setMuscleMass("");
       setChest(""); setWaist(""); setHips(""); setArms(""); setThighs(""); setCalves("");
+      setPhotos([]);
     } catch (err) {
       console.error(err);
       alert("Erro ao salvar avaliação.");
@@ -181,6 +217,44 @@ export function AssessmentView({ clientId, clientName, onBack, isPersonal }: { c
               </div>
             </div>
 
+            <div className="space-y-4">
+              <div className="border-b border-white/5 pb-2">
+                <h4 className="text-sm font-bold text-orange-500 uppercase tracking-wider">Acompanhamento Visual</h4>
+              </div>
+              
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                {photos.map((photo, index) => (
+                  <div key={index} className="relative aspect-square rounded-xl overflow-hidden border border-white/10 group">
+                    <img src={photo.preview} alt="Preview" className="w-full h-full object-cover" />
+                    <button 
+                      type="button"
+                      onClick={() => removePhoto(index)}
+                      className="absolute top-2 right-2 p-1.5 bg-red-500 text-white rounded-lg opacity-0 group-hover:opacity-100 transition-opacity"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                ))}
+                
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="aspect-square rounded-xl border-2 border-dashed border-white/10 hover:border-orange-500/50 hover:bg-orange-600/5 flex flex-col items-center justify-center gap-2 transition-all text-neutral-500 hover:text-orange-500"
+                >
+                  <Camera className="w-8 h-8" />
+                  <span className="text-xs font-medium">Adicionar Foto</span>
+                </button>
+              </div>
+              <input 
+                type="file" 
+                ref={fileInputRef} 
+                onChange={handleFileChange} 
+                multiple 
+                accept="image/*" 
+                className="hidden" 
+              />
+            </div>
+
             <button
               type="submit"
               disabled={isSubmitting}
@@ -236,6 +310,7 @@ export function AssessmentView({ clientId, clientName, onBack, isPersonal }: { c
                     <th className="px-6 py-4 font-medium">Cintura</th>
                     <th className="px-6 py-4 font-medium">Braço</th>
                     <th className="px-6 py-4 font-medium">Coxa</th>
+                    <th className="px-6 py-4 font-medium text-right">Fotos</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/5">
@@ -250,6 +325,23 @@ export function AssessmentView({ clientId, clientName, onBack, isPersonal }: { c
                       <td className="px-6 py-4">{a.waist} cm</td>
                       <td className="px-6 py-4">{a.arms} cm</td>
                       <td className="px-6 py-4">{a.thighs} cm</td>
+                      <td className="px-6 py-4 text-right">
+                        {a.photos && a.photos.length > 0 ? (
+                          <div className="flex justify-end gap-1">
+                            {a.photos.map((url: string, idx: number) => (
+                              <button 
+                                key={idx}
+                                onClick={() => window.open(url, '_blank')}
+                                className="w-8 h-8 rounded-lg overflow-hidden border border-white/10 hover:border-orange-500 transition-all"
+                              >
+                                <img src={url} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                              </button>
+                            ))}
+                          </div>
+                        ) : (
+                          <span className="text-neutral-600 italic text-xs">Sem fotos</span>
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>

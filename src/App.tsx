@@ -1937,7 +1937,7 @@ function PersonalDashboard() {
       {showAdd && (
         <div className="bg-neutral-900 p-6 rounded-2xl border border-white/10 shadow-2xl space-y-6">
           <div>
-            <h3 className="text-lg font-medium text-white mb-4">Convidar por Email</h3>
+            <h3 className="text-lg font-medium text-white mb-4">Adicionar Aluno por Email</h3>
             <form onSubmit={sendInvite} className="flex gap-2">
               <input
                 type="email"
@@ -2743,6 +2743,10 @@ function ClientDashboard({ onViewAllWorkouts, onViewSubscriptions }: { onViewAll
   const [selectedWorkout, setSelectedWorkout] = useState<any>(null);
   const [chatRoom, setChatRoom] = useState<{ id: string; name: string } | null>(null);
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+  const [personalCode, setPersonalCode] = useState("");
+  const [isConnecting, setIsConnecting] = useState(false);
+  const [connectStatus, setConnectStatus] = useState<{ type: 'success' | 'error', message: string } | null>(null);
+  const [showAddPersonal, setShowAddPersonal] = useState(false);
 
   const todayStr = new Date().toISOString().split('T')[0];
   const tomorrow = new Date();
@@ -2795,6 +2799,63 @@ function ClientDashboard({ onViewAllWorkouts, onViewSubscriptions }: { onViewAll
 
   const isBlocked = personals.some(p => p.status === "blocked");
 
+  const connectWithPersonal = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!personalCode.trim() || !user) return;
+
+    setIsConnecting(true);
+    setConnectStatus(null);
+
+    try {
+      const q = query(
+        collection(db, "users"), 
+        where("role", "==", "personal"), 
+        where("personalCode", "==", personalCode.trim().toUpperCase())
+      );
+      const querySnapshot = await getDocs(q);
+
+      if (querySnapshot.empty) {
+        setConnectStatus({ type: 'error', message: "Código do personal inválido." });
+        setIsConnecting(false);
+        return;
+      }
+
+      const personalDoc = querySnapshot.docs[0];
+      const personalId = personalDoc.id;
+
+      // Check if already connected
+      const connQ = query(
+        collection(db, "connections"),
+        where("personal_id", "==", personalId),
+        where("client_id", "==", user.id)
+      );
+      const connSnapshot = await getDocs(connQ);
+
+      if (!connSnapshot.empty) {
+        setConnectStatus({ type: 'error', message: "Você já está conectado a este personal." });
+        setIsConnecting(false);
+        return;
+      }
+
+      await addDoc(collection(db, "connections"), {
+        personal_id: personalId,
+        client_id: user.id,
+        status: "active",
+        createdAt: new Date().toISOString()
+      });
+
+      setConnectStatus({ type: 'success', message: "Conectado com sucesso!" });
+      setPersonalCode("");
+      fetchPersonals();
+    } catch (err) {
+      console.error(err);
+      setConnectStatus({ type: 'error', message: "Erro ao conectar. Tente novamente." });
+    } finally {
+      setIsConnecting(false);
+      setTimeout(() => setConnectStatus(null), 5000);
+    }
+  };
+
   if (selectedWorkout) {
     return (
       <ClientWorkoutView 
@@ -2826,16 +2887,62 @@ function ClientDashboard({ onViewAllWorkouts, onViewSubscriptions }: { onViewAll
         </button>
       )}
 
-      <h2 className="text-2xl font-bold text-white">Meus Treinadores</h2>
+      <div className="flex items-center justify-between">
+        <h2 className="text-2xl font-bold text-white">Meus Treinadores</h2>
+        {personals.length > 0 && (
+          <button 
+            onClick={() => setShowAddPersonal(!showAddPersonal)}
+            className="flex items-center gap-2 text-sm font-medium text-orange-500 hover:text-orange-400 transition-colors"
+          >
+            {showAddPersonal ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+            {showAddPersonal ? "Cancelar" : "Novo Treinador"}
+          </button>
+        )}
+      </div>
       
       <div className="grid gap-4">
-        {personals.length === 0 ? (
-          <div className="bg-neutral-900 p-12 rounded-2xl border border-white/10 shadow-2xl text-center">
-            <img src="https://i.imgur.com/fxOHjtK.png" alt="Track & Health Logo" className="w-16 h-16 object-contain mx-auto mb-4 opacity-50 grayscale" referrerPolicy="no-referrer" />
-            <h3 className="text-xl font-medium text-white mb-2">Nenhum treinador conectado</h3>
-            <p className="text-neutral-500">Um personal trainer adicionará você à lista dele.</p>
+        {(personals.length === 0 || showAddPersonal) && (
+          <div className="bg-neutral-900 p-8 rounded-2xl border border-white/10 shadow-2xl text-center space-y-6">
+            <div>
+              <img src="https://i.imgur.com/fxOHjtK.png" alt="Track & Health Logo" className="w-16 h-16 object-contain mx-auto mb-4 opacity-50 grayscale" referrerPolicy="no-referrer" />
+              <h3 className="text-xl font-medium text-white mb-2">
+                {personals.length === 0 ? "Nenhum treinador conectado" : "Conectar com novo treinador"}
+              </h3>
+              <p className="text-neutral-500 text-sm">
+                {personals.length === 0 
+                  ? "Você pode aguardar seu personal te adicionar ou inserir o código dele abaixo."
+                  : "Insira o código do novo personal trainer para se conectar."}
+              </p>
+            </div>
+
+            <form onSubmit={connectWithPersonal} className="max-w-xs mx-auto space-y-3">
+              <div className="relative">
+                <input
+                  type="text"
+                  placeholder="Código do Personal"
+                  value={personalCode}
+                  onChange={(e) => setPersonalCode(e.target.value.toUpperCase())}
+                  className="w-full bg-neutral-800 border border-white/10 rounded-xl px-4 py-3 text-white text-center font-mono font-bold tracking-widest focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  required
+                />
+              </div>
+              <button
+                type="submit"
+                disabled={isConnecting || !personalCode.trim()}
+                className="w-full bg-orange-600 hover:bg-orange-500 disabled:opacity-50 text-white font-bold py-3 rounded-xl transition-all shadow-lg shadow-orange-600/20"
+              >
+                {isConnecting ? "Conectando..." : "Conectar"}
+              </button>
+              {connectStatus && (
+                <p className={`text-xs font-medium ${connectStatus.type === 'success' ? 'text-emerald-500' : 'text-red-500'}`}>
+                  {connectStatus.message}
+                </p>
+              )}
+            </form>
           </div>
-        ) : (
+        )}
+
+        {personals.length > 0 && (
           personals.map(personal => (
             <div key={personal.id} className="bg-neutral-900 p-6 rounded-2xl border border-white/10 shadow-2xl flex items-center justify-between">
               <div className="flex items-center gap-4">
