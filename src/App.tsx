@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, FormEvent, ChangeEvent, ReactNode } from "react";
 import { BrowserRouter, Routes, Route, Navigate, useNavigate } from "react-router-dom";
-import { User, LogOut, Users, Dumbbell, Activity, Search, Plus, ArrowLeft, Clock, Play, Check, Trash2, ChevronLeft, ChevronRight, Calendar as CalendarIcon, AlertTriangle, Image as ImageIcon, Video, Upload, X, Copy, Edit2, MessageSquare, CheckCircle2, XCircle, Circle, GripVertical, Send, CreditCard, FileText, History, RefreshCw } from "lucide-react";
+import { User, LogOut, Users, Dumbbell, Activity, Search, Plus, ArrowLeft, Clock, Play, Check, Trash2, ChevronLeft, ChevronRight, Calendar as CalendarIcon, AlertTriangle, Image as ImageIcon, Video, Upload, X, Copy, Edit2, MessageSquare, CheckCircle2, XCircle, Circle, GripVertical, Send, CreditCard, FileText, History, RefreshCw, Globe, UserCheck, AlertCircle } from "lucide-react";
 import { DragDropContext, Droppable, Draggable, DropResult } from "@hello-pangea/dnd";
 import { auth, db } from "./firebase";
 import { EXERCISES } from "./data/exercises";
@@ -43,6 +43,7 @@ function Login() {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [name, setName] = useState("");
+  const [gender, setGender] = useState<"male" | "female" | "other" | "">("");
   const [role, setRole] = useState<"personal" | "client" | "superadmin">("client");
   const [personalCode, setPersonalCode] = useState("");
   const [error, setError] = useState("");
@@ -125,6 +126,7 @@ function Login() {
         await setDoc(doc(db, "users", uid), {
           name,
           email,
+          gender,
           role,
           profileCompleted: false,
           createdAt: new Date().toISOString(),
@@ -214,6 +216,47 @@ function Login() {
               required
             />
           </div>
+
+          {!isLogin && !isForgotPassword && (
+            <div>
+              <label className="block text-sm font-medium text-neutral-500 dark:text-neutral-400 mb-2">Gênero</label>
+              <div className="grid grid-cols-3 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setGender("male")}
+                  className={`py-2 px-3 rounded-xl border text-xs transition-all ${
+                    gender === "male"
+                      ? "bg-orange-600/20 border-orange-600 text-orange-500"
+                      : "bg-neutral-50 dark:bg-neutral-800 border-neutral-200 dark:border-white/10 text-neutral-500 dark:text-neutral-400 hover:border-neutral-300 dark:hover:border-neutral-700"
+                  }`}
+                >
+                  Masculino
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setGender("female")}
+                  className={`py-2 px-3 rounded-xl border text-xs transition-all ${
+                    gender === "female"
+                      ? "bg-orange-600/20 border-orange-600 text-orange-500"
+                      : "bg-neutral-50 dark:bg-neutral-800 border-neutral-200 dark:border-white/10 text-neutral-500 dark:text-neutral-400 hover:border-neutral-300 dark:hover:border-neutral-700"
+                  }`}
+                >
+                  Feminino
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setGender("other")}
+                  className={`py-2 px-3 rounded-xl border text-xs transition-all ${
+                    gender === "other"
+                      ? "bg-orange-600/20 border-orange-600 text-orange-500"
+                      : "bg-neutral-50 dark:bg-neutral-800 border-neutral-200 dark:border-white/10 text-neutral-500 dark:text-neutral-400 hover:border-neutral-300 dark:hover:border-neutral-700"
+                  }`}
+                >
+                  Outro
+                </button>
+              </div>
+            </div>
+          )}
 
           {!isForgotPassword && (
             <div>
@@ -1626,6 +1669,7 @@ function PersonalDashboard() {
   const [showAdd, setShowAdd] = useState(false);
   const [sortBy, setSortBy] = useState<"name" | "date">("name");
   const [selectedClient, setSelectedClient] = useState<any>(null);
+  const [showClassificationModal, setShowClassificationModal] = useState(false);
   const [clientTab, setClientTab] = useState<"workouts" | "history" | "assessments" | "statistics">("workouts");
   const [chatRoom, setChatRoom] = useState<{ id: string; name: string } | null>(null);
   const [inviteEmail, setInviteEmail] = useState("");
@@ -1639,6 +1683,12 @@ function PersonalDashboard() {
     }
   }, [user]);
 
+  useEffect(() => {
+    if (selectedClient && !selectedClient.clientType) {
+      setShowClassificationModal(true);
+    }
+  }, [selectedClient]);
+
   const fetchClients = async () => {
     if (!user) return;
     const q = query(collection(db, "connections"), where("personal_id", "==", user.id));
@@ -1651,6 +1701,8 @@ function PersonalDashboard() {
         id: clientDoc.id, 
         ...clientDoc.data(), 
         status: data.status,
+        connectionId: connectionDoc.id,
+        clientType: data.type || null,
         connectionDate: data.createdAt || ""
       };
     });
@@ -1691,6 +1743,18 @@ function PersonalDashboard() {
     }
   };
 
+  const updateClientType = async (connectionId: string, type: "online" | "presencial") => {
+    try {
+      await updateDoc(doc(db, "connections", connectionId), { type });
+      setShowClassificationModal(false);
+      fetchClients();
+      if (selectedClient && selectedClient.connectionId === connectionId) {
+        setSelectedClient({ ...selectedClient, clientType: type });
+      }
+    } catch (err) {
+      console.error("Erro ao atualizar tipo do aluno:", err);
+    }
+  };
   const toggleClientStatus = async (clientId: string, currentStatus: string) => {
     try {
       const q = query(
@@ -2020,6 +2084,46 @@ function PersonalDashboard() {
           recipientName={chatRoom.name} 
           onClose={() => setChatRoom(null)} 
         />
+      )}
+
+      {showClassificationModal && selectedClient && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+          <div className="bg-neutral-900 w-full max-w-md p-8 rounded-3xl border border-white/10 shadow-2xl text-center">
+            <div className="w-16 h-16 bg-orange-600/20 rounded-full flex items-center justify-center text-orange-500 mx-auto mb-6">
+              <UserCheck className="w-8 h-8" />
+            </div>
+            <h3 className="text-xl font-bold text-white mb-2">Classificar Aluno</h3>
+            <p className="text-neutral-400 text-sm mb-8">
+              Como o aluno <span className="text-white font-bold">{selectedClient.displayName || selectedClient.name}</span> se enquadra?
+            </p>
+            <div className="grid grid-cols-2 gap-4">
+              <button 
+                onClick={() => updateClientType(selectedClient.connectionId, "online")}
+                className="flex flex-col items-center gap-3 p-6 rounded-2xl bg-neutral-800 border border-white/5 hover:border-orange-500/50 hover:bg-orange-600/5 transition-all group"
+              >
+                <div className="w-12 h-12 bg-blue-500/10 rounded-xl flex items-center justify-center text-blue-500 group-hover:scale-110 transition-transform">
+                  <Globe className="w-6 h-6" />
+                </div>
+                <span className="text-sm font-bold text-white">Online</span>
+              </button>
+              <button 
+                onClick={() => updateClientType(selectedClient.connectionId, "presencial")}
+                className="flex flex-col items-center gap-3 p-6 rounded-2xl bg-neutral-800 border border-white/5 hover:border-orange-500/50 hover:bg-orange-600/5 transition-all group"
+              >
+                <div className="w-12 h-12 bg-emerald-500/10 rounded-xl flex items-center justify-center text-emerald-500 group-hover:scale-110 transition-transform">
+                  <User className="w-6 h-6" />
+                </div>
+                <span className="text-sm font-bold text-white">Presencial</span>
+              </button>
+            </div>
+            <button 
+              onClick={() => setShowClassificationModal(false)}
+              className="mt-8 text-neutral-500 hover:text-white text-xs font-medium transition-colors"
+            >
+              Decidir depois
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );
@@ -2884,6 +2988,7 @@ function CompleteProfile({ isEditing = false, userOverride = null, onComplete = 
   const [city, setCity] = useState(user?.city || "");
   const [birthDate, setBirthDate] = useState(user?.birthDate || "");
   const [cref, setCref] = useState(user?.cref || "");
+  const [gender, setGender] = useState<"male" | "female" | "other" | "">(user?.gender || "");
   const [displayName, setDisplayName] = useState(user?.displayName || "");
   const [photoUrl, setPhotoUrl] = useState(user?.photoUrl || "");
   const [anamnesis, setAnamnesis] = useState(user?.anamnesis || {
@@ -2932,6 +3037,7 @@ function CompleteProfile({ isEditing = false, userOverride = null, onComplete = 
         address,
         city,
         birthDate,
+        gender,
         displayName: displayName || user.name,
         photoUrl,
         profileCompleted: true,
@@ -3044,6 +3150,44 @@ function CompleteProfile({ isEditing = false, userOverride = null, onComplete = 
                 placeholder="Sua Cidade"
                 required
               />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-neutral-400 mb-2">Gênero</label>
+              <div className="grid grid-cols-3 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setGender("male")}
+                  className={`py-2 px-3 rounded-xl border text-xs transition-all ${
+                    gender === "male"
+                      ? "bg-orange-600/20 border-orange-600 text-orange-500"
+                      : "bg-neutral-800 border-white/10 text-neutral-400 hover:border-neutral-700"
+                  }`}
+                >
+                  Masculino
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setGender("female")}
+                  className={`py-2 px-3 rounded-xl border text-xs transition-all ${
+                    gender === "female"
+                      ? "bg-orange-600/20 border-orange-600 text-orange-500"
+                      : "bg-neutral-800 border-white/10 text-neutral-400 hover:border-neutral-700"
+                  }`}
+                >
+                  Feminino
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setGender("other")}
+                  className={`py-2 px-3 rounded-xl border text-xs transition-all ${
+                    gender === "other"
+                      ? "bg-orange-600/20 border-orange-600 text-orange-500"
+                      : "bg-neutral-800 border-white/10 text-neutral-400 hover:border-neutral-700"
+                  }`}
+                >
+                  Outro
+                </button>
+              </div>
             </div>
           </div>
 
@@ -3629,6 +3773,10 @@ function SuperAdminDashboard() {
   const clients = filteredUsers.filter(u => u.role === "client");
   const admins = filteredUsers.filter(u => u.role === "superadmin");
 
+  const onlineClientsCount = connections.filter(c => c.type === "online").length;
+  const presencialClientsCount = connections.filter(c => c.type === "presencial").length;
+  const unclassifiedClientsCount = connections.filter(c => !c.type).length;
+
   if (impersonatedUser) {
     return (
       <div className="space-y-6">
@@ -3688,6 +3836,32 @@ function SuperAdminDashboard() {
           Mensagens
         </button>
       </div>
+
+      {(activeTab === "users" || activeTab === "hierarchy") && (
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="bg-neutral-900 p-6 rounded-2xl border border-white/10 shadow-xl">
+            <div className="flex items-center gap-3 mb-2">
+              <Globe className="w-5 h-5 text-blue-500" />
+              <p className="text-neutral-500 text-[10px] font-bold uppercase tracking-widest">Alunos Online</p>
+            </div>
+            <p className="text-3xl font-black text-white">{onlineClientsCount}</p>
+          </div>
+          <div className="bg-neutral-900 p-6 rounded-2xl border border-white/10 shadow-xl">
+            <div className="flex items-center gap-3 mb-2">
+              <User className="w-5 h-5 text-emerald-500" />
+              <p className="text-neutral-500 text-[10px] font-bold uppercase tracking-widest">Alunos Presenciais</p>
+            </div>
+            <p className="text-3xl font-black text-white">{presencialClientsCount}</p>
+          </div>
+          <div className="bg-neutral-900 p-6 rounded-2xl border border-white/10 shadow-xl">
+            <div className="flex items-center gap-3 mb-2">
+              <AlertCircle className="w-5 h-5 text-orange-500" />
+              <p className="text-neutral-500 text-[10px] font-bold uppercase tracking-widest">Não Classificados</p>
+            </div>
+            <p className="text-3xl font-black text-white">{unclassifiedClientsCount}</p>
+          </div>
+        </div>
+      )}
 
       {activeTab === "messages" && (
         <div className="space-y-6">
@@ -3814,6 +3988,7 @@ function SuperAdminDashboard() {
                 if (text) sendSystemMessage(id, text);
               }}
               onImpersonate={setImpersonatedUser}
+              connections={connections}
             />
           ) : (
             <>
@@ -4070,15 +4245,28 @@ function AdminUserEditView({
   onUpdateRole, 
   onToggleBlock, 
   onSendMessage, 
-  onImpersonate 
+  onImpersonate,
+  connections
 }: { 
   user: UserType, 
   onClose: () => void,
   onUpdateRole: (id: string, role: "personal" | "client") => void,
   onToggleBlock: (id: string, current: boolean) => void,
   onSendMessage: (id: string) => void,
-  onImpersonate: (user: UserType) => void
+  onImpersonate: (user: UserType) => void,
+  connections: any[]
 }) {
+  const userConnection = connections.find(c => c.client_id === user.id);
+
+  const updateType = async (type: "online" | "presencial") => {
+    if (!userConnection) return;
+    try {
+      await updateDoc(doc(db, "connections", userConnection.id), { type });
+      alert("Tipo de aluno atualizado!");
+    } catch (error) {
+      console.error("Error updating type:", error);
+    }
+  };
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-300">
       <div className="flex items-center justify-between">
@@ -4130,6 +4318,34 @@ function AdminUserEditView({
                   <option value="personal">Personal</option>
                 </select>
               </div>
+
+              {user.role === "client" && userConnection && (
+                <div className="flex flex-col gap-2">
+                  <label className="text-[10px] font-bold text-neutral-500 uppercase tracking-widest">Classificação</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button 
+                      onClick={() => updateType("online")}
+                      className={`py-2 px-3 rounded-xl border text-[10px] font-bold uppercase tracking-widest transition-all ${
+                        userConnection.type === "online" 
+                          ? "bg-blue-500/20 border-blue-500 text-blue-400" 
+                          : "bg-neutral-800 border-white/5 text-neutral-500 hover:border-white/10"
+                      }`}
+                    >
+                      Online
+                    </button>
+                    <button 
+                      onClick={() => updateType("presencial")}
+                      className={`py-2 px-3 rounded-xl border text-[10px] font-bold uppercase tracking-widest transition-all ${
+                        userConnection.type === "presencial" 
+                          ? "bg-emerald-500/20 border-emerald-500 text-emerald-400" 
+                          : "bg-neutral-800 border-white/5 text-neutral-500 hover:border-white/10"
+                      }`}
+                    >
+                      Presencial
+                    </button>
+                  </div>
+                </div>
+              )}
 
               <div className="grid grid-cols-2 gap-2">
                 <button 
