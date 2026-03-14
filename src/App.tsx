@@ -3268,23 +3268,32 @@ function CompleteProfile({ isEditing = false, userOverride = null, onComplete = 
     setError("");
 
     try {
-      const dataToUpdate = {
+      const publicData = {
+        name: displayName || user.name,
+        photoUrl,
+        city,
+        profileCompleted: true,
+        ...(user.role === "personal" ? { cref } : {})
+      };
+
+      const privateData = {
         cpf,
         cep,
         address,
-        city,
         birthDate,
         gender,
-        displayName: displayName || user.name,
-        photoUrl,
-        profileCompleted: true,
-        ...(user.role === "personal" ? { cref } : { anamnesis })
+        ...(user.role === "student" ? { anamnesis } : {}),
+        medicalHistory: anamnesis.medicalHistory || "",
+        medications: anamnesis.medications || ""
       };
 
-      await updateDoc(doc(db, "users", user.id), dataToUpdate);
+      const batch = writeBatch(db);
+      batch.update(doc(db, "users_public", user.id), publicData);
+      batch.update(doc(db, "users_private", user.id), privateData);
+      await batch.commit();
       
       if (!userOverride) {
-        updateUser(dataToUpdate);
+        updateUser({ ...publicData, ...privateData });
       }
       
       if (onComplete) {
@@ -5018,7 +5027,13 @@ function Dashboard() {
                           const userAuth = auth.currentUser;
                           if (userAuth) {
                             // Delete from Firestore first
-                            await deleteDoc(doc(db, "users", userAuth.uid));
+                            const batch = writeBatch(db);
+                            batch.delete(doc(db, "users_public", userAuth.uid));
+                            batch.delete(doc(db, "users_private", userAuth.uid));
+                            if (userAuth.email) {
+                              batch.delete(doc(db, "user_emails", userAuth.email.toLowerCase()));
+                            }
+                            await batch.commit();
                             // Delete from Auth
                             await deleteUser(userAuth);
                             alert("Sua conta foi excluída com sucesso.");
