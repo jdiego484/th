@@ -44,7 +44,7 @@ function Login() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [name, setName] = useState("");
   const [gender, setGender] = useState<"male" | "female" | "other" | "">("");
-  const [role, setRole] = useState<"personal" | "client" | "superadmin">("client");
+  const [role, setRole] = useState<"personal" | "student" | "superadmin">("student");
   const [personalCode, setPersonalCode] = useState("");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -104,8 +104,8 @@ function Login() {
       } else {
         let foundPersonalId = null;
         
-        if (role === "client" && personalCode.trim() !== "") {
-          const q = query(collection(db, "users"), where("role", "==", "personal"), where("personalCode", "==", personalCode.trim().toUpperCase()));
+        if (role === "student" && personalCode.trim() !== "") {
+          const q = query(collection(db, "users_public"), where("role", "==", "personal"), where("personalCode", "==", personalCode.trim().toUpperCase()));
           const querySnapshot = await getDocs(q);
           if (querySnapshot.empty) {
             setError("Código do personal inválido.");
@@ -123,20 +123,38 @@ function Login() {
           newPersonalCode = Math.random().toString(36).substring(2, 8).toUpperCase();
         }
 
-        await setDoc(doc(db, "users", uid), {
+        const batch = writeBatch(db);
+
+        // Public profile
+        batch.set(doc(db, "users_public", uid), {
           name,
-          email: email.trim().toLowerCase(),
-          gender,
-          role,
+          photoUrl: "",
+          city: "",
+          role: role,
+          personalCode: newPersonalCode || (personalCode.trim() ? personalCode.trim().toUpperCase() : ""),
           profileCompleted: false,
-          createdAt: new Date().toISOString(),
-          ...(role === "personal" ? { personalCode: newPersonalCode } : (personalCode.trim() ? { personalCode: personalCode.trim().toUpperCase() } : {}))
+          createdAt: new Date().toISOString()
         });
+
+        // Private data
+        batch.set(doc(db, "users_private", uid), {
+          email: email.trim().toLowerCase(),
+          cpf: "",
+          medicalHistory: "",
+          medications: ""
+        });
+
+        // Email lookup
+        batch.set(doc(db, "user_emails", email.trim().toLowerCase()), {
+          uid
+        });
+
+        await batch.commit();
 
         if (foundPersonalId) {
           await addDoc(collection(db, "connections"), {
-            personal_id: foundPersonalId,
-            client_id: uid,
+            personalId: foundPersonalId,
+            studentId: uid,
             status: "active",
             createdAt: new Date().toISOString()
           });
@@ -292,9 +310,9 @@ function Login() {
               <div className="grid grid-cols-2 gap-4">
                 <button
                   type="button"
-                  onClick={() => setRole("client")}
+                  onClick={() => setRole("student")}
                   className={`py-3 px-4 rounded-xl border transition-all ${
-                    role === "client"
+                    role === "student"
                       ? "bg-orange-600/20 border-orange-600 text-orange-500"
                       : "bg-neutral-50 dark:bg-neutral-800 border-neutral-200 dark:border-white/10 text-neutral-500 dark:text-neutral-400 hover:border-neutral-300 dark:hover:border-neutral-700"
                   }`}
@@ -316,7 +334,7 @@ function Login() {
             </div>
           )}
 
-          {!isLogin && !isForgotPassword && role === "client" && (
+          {!isLogin && !isForgotPassword && role === "student" && (
             <div>
               <label className="block text-sm font-medium text-neutral-500 dark:text-neutral-400 mb-1">Código do Personal (Opcional)</label>
               <input
@@ -524,11 +542,17 @@ function WorkoutBuilder({ client, onBack, existingWorkout, personalOverrideId }:
     try {
       const q = query(
         collection(db, "workouts"),
-        where("client_id", "==", client.id),
-        where("personal_id", "==", personalId)
+        where("studentId", "==", client.id),
+        where("personalId", "==", personalId)
       );
       const querySnapshot = await getDocs(q);
-      const workoutsData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      const workoutsData = await Promise.all(querySnapshot.docs.map(async (workoutDoc) => {
+        const data = workoutDoc.data();
+        const exercisesQ = query(collection(db, "exercises"), where("workoutId", "==", workoutDoc.id), orderBy("order", "asc"));
+        const exercisesSnapshot = await getDocs(exercisesQ);
+        const exercises = exercisesSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        return { id: workoutDoc.id, ...data, exercises };
+      }));
       workoutsData.sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
       setPastWorkouts(workoutsData);
     } catch (error) {
@@ -614,7 +638,19 @@ function WorkoutBuilder({ client, onBack, existingWorkout, personalOverrideId }:
     if (!window.confirm("CONFIRMAR EXCLUSÃO: Tem certeza que deseja excluir este treino permanentemente?")) return;
     
     try {
-      await deleteDoc(doc(db, "workouts", id));
+      const batch = writeBatch(db);
+      
+      // Delete workout document
+      batch.delete(doc(db, "workouts", id));
+      
+      // Delete associated exercises
+      const q = query(collection(db, "exercises"), where("workoutId", "==", id));
+      const exerciseSnapshot = await getDocs(q);
+      exerciseSnapshot.docs.forEach(exDoc => {
+        batch.delete(exDoc.ref);
+      });
+      
+      await batch.commit();
       alert("Treino excluído com sucesso!");
       onBack();
     } catch (error: any) {
@@ -627,24 +663,44 @@ function WorkoutBuilder({ client, onBack, existingWorkout, personalOverrideId }:
     if (exercises.length === 0 || !personalId) return;
     setIsSaving(true);
     try {
-      // Create a date object from the selected date string, setting time to noon to avoid timezone issues
       const dateObj = new Date(`${workoutDate}T12:00:00Z`);
       
       const workoutData = {
-        personal_id: personalId,
-        client_id: client.id,
+        personalId: personalId,
+        studentId: client.id,
         date: dateObj.toISOString(),
-        exercises,
-        status: existingWorkout?.status || "active"
+        status: existingWorkout?.status || "active",
+        createdAt: existingWorkout?.createdAt || new Date().toISOString()
       };
 
-      if (existingWorkout?.id) {
-        await updateDoc(doc(db, "workouts", existingWorkout.id), workoutData);
-        alert("Treino atualizado com sucesso!");
+      const batch = writeBatch(db);
+      let workoutId = existingWorkout?.id;
+
+      if (workoutId) {
+        batch.update(doc(db, "workouts", workoutId), workoutData);
+        
+        // Delete old exercises to replace them
+        const q = query(collection(db, "exercises"), where("workoutId", "==", workoutId));
+        const oldExercises = await getDocs(q);
+        oldExercises.docs.forEach(exDoc => batch.delete(exDoc.ref));
       } else {
-        await addDoc(collection(db, "workouts"), workoutData);
-        alert("Treino salvo com sucesso!");
+        const newWorkoutRef = doc(collection(db, "workouts"));
+        workoutId = newWorkoutRef.id;
+        batch.set(newWorkoutRef, workoutData);
       }
+
+      // Add new exercises
+      exercises.forEach((ex, index) => {
+        const exRef = doc(collection(db, "exercises"));
+        batch.set(exRef, {
+          ...ex,
+          workoutId,
+          order: index
+        });
+      });
+
+      await batch.commit();
+      alert(existingWorkout?.id ? "Treino atualizado com sucesso!" : "Treino salvo com sucesso!");
       localStorage.removeItem(draftKey);
       onBack();
     } catch (err) {
@@ -1022,7 +1078,7 @@ function ClientStatistics({ clientId, onBack }: { clientId: string, onBack: () =
       try {
         const q = query(
           collection(db, "workouts"),
-          where("client_id", "==", clientId)
+          where("studentId", "==", clientId)
         );
         const snapshot = await getDocs(q);
         const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -1197,8 +1253,8 @@ function WorkoutHistory({ client, onBack }: { client: any, onBack: () => void })
     try {
       const q = query(
         collection(db, "workouts"), 
-        where("client_id", "==", client.id),
-        where("personal_id", "==", user.id)
+        where("studentId", "==", client.id),
+        where("personalId", "==", user.id)
       );
       const querySnapshot = await getDocs(q);
       const workoutsData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -1419,7 +1475,7 @@ function WorkoutHistory({ client, onBack }: { client: any, onBack: () => void })
                         Treino de {new Date(workout.date).toLocaleDateString('pt-BR')}
                       </h3>
                       <p className="text-sm text-neutral-400">
-                        {workout.exercises.length} exercícios • Status: {workout.status === 'active' ? (
+                        Status: {workout.status === 'active' ? (
                           <span className="text-blue-400">Ativo</span>
                         ) : (
                           <span className="text-emerald-400 flex items-center gap-1 inline-flex">
@@ -1538,7 +1594,7 @@ function ChatModal({
       setLoading(false);
       isInitialLoad.current = false;
     }, (error) => {
-      handleFirestoreError(error, OperationType.GET, `chats/${roomId}/messages`);
+      handleFirestoreError(error, OperationType.LIST, `chats/${roomId}/messages`);
     });
 
     return () => unsubscribe();
@@ -1692,12 +1748,12 @@ function PersonalDashboard() {
 
   const fetchClients = async () => {
     if (!user) return;
-    const q = query(collection(db, "connections"), where("personal_id", "==", user.id));
+    const q = query(collection(db, "connections"), where("personalId", "==", user.id));
     const querySnapshot = await getDocs(q);
     
     const clientPromises = querySnapshot.docs.map(async (connectionDoc) => {
       const data = connectionDoc.data();
-      const clientDoc = await getDoc(doc(db, "users", data.client_id));
+      const clientDoc = await getDoc(doc(db, "users_public", data.studentId));
       return { 
         id: clientDoc.id, 
         ...clientDoc.data(), 
@@ -1713,10 +1769,19 @@ function PersonalDashboard() {
   };
 
   const fetchAllClients = async () => {
-    const q = query(collection(db, "users"), where("role", "==", "client"));
-    const querySnapshot = await getDocs(q);
-    const clientsData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-    setAllClients(clientsData);
+    try {
+      const q = query(collection(db, "users_public"), where("role", "==", "student"));
+      const querySnapshot = await getDocs(q).catch(err => {
+        console.error("Erro ao buscar todos os alunos:", err);
+        handleFirestoreError(err, OperationType.LIST, "users_public");
+      });
+      if (querySnapshot) {
+        const clientsData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        setAllClients(clientsData);
+      }
+    } catch (err) {
+      console.error("Erro no fetchAllClients:", err);
+    }
   };
 
   const addClient = async (clientId: string) => {
@@ -1724,15 +1789,15 @@ function PersonalDashboard() {
       // Check if connection already exists
       const q = query(
         collection(db, "connections"), 
-        where("personal_id", "==", user?.id),
-        where("client_id", "==", clientId)
+        where("personalId", "==", user?.id),
+        where("studentId", "==", clientId)
       );
-      const snapshot = await getDocs(q).catch(err => handleFirestoreError(err, OperationType.GET, "connections"));
+      const snapshot = await getDocs(q).catch(err => handleFirestoreError(err, OperationType.LIST, "connections"));
       
       if (snapshot && snapshot.empty) {
         await addDoc(collection(db, "connections"), {
-          personal_id: user?.id,
-          client_id: clientId,
+          personalId: user?.id,
+          studentId: clientId,
           status: "active",
           createdAt: new Date().toISOString()
         }).catch(err => handleFirestoreError(err, OperationType.CREATE, "connections"));
@@ -1740,7 +1805,8 @@ function PersonalDashboard() {
         setShowAdd(false);
       }
     } catch (err) {
-      console.error(err);
+      console.error("Erro no addClient:", err);
+      throw err;
     }
   };
 
@@ -1760,8 +1826,8 @@ function PersonalDashboard() {
     try {
       const q = query(
         collection(db, "connections"), 
-        where("personal_id", "==", user?.id),
-        where("client_id", "==", clientId)
+        where("personalId", "==", user?.id),
+        where("studentId", "==", clientId)
       );
       const snapshot = await getDocs(q);
       
@@ -1786,48 +1852,51 @@ function PersonalDashboard() {
     setInviteStatus(null);
 
     try {
-      console.log("Enviando convite:", { addMethod, inviteEmail, userId: user.id });
+      console.log("Enviando convite - Início:", { addMethod, inviteEmail, userId: user.id });
       if (addMethod === 'existing') {
-        // 1. Check if user already exists
-        const q = query(collection(db, "users"), where("email", "==", inviteEmail.trim().toLowerCase()));
-        const snapshot = await getDocs(q).catch(err => {
-          console.error("Erro ao buscar usuário:", err);
-          handleFirestoreError(err, OperationType.GET, "users");
+        // 1. Check if user already exists via email lookup
+        console.log("Buscando usuário existente com email:", inviteEmail.trim().toLowerCase());
+        const emailDoc = await getDoc(doc(db, "user_emails", inviteEmail.trim().toLowerCase())).catch(err => {
+          console.error("Erro ao buscar email no Firestore:", err);
+          handleFirestoreError(err, OperationType.GET, "user_emails");
         });
 
-        if (snapshot && !snapshot.empty) {
-          const clientUser = snapshot.docs[0];
-          console.log("Usuário encontrado:", clientUser.id);
-          if (clientUser.data().role !== 'client') {
+        if (emailDoc && emailDoc.exists()) {
+          const studentId = emailDoc.data().uid;
+          console.log("Usuário encontrado via lookup:", studentId);
+          
+          const studentPublic = await getDoc(doc(db, "users_public", studentId));
+          if (studentPublic.exists() && studentPublic.data().role === 'student') {
+            console.log("Chamando addClient para:", studentId);
+            await addClient(studentId);
+            setInviteStatus({ type: 'success', message: "Aluno encontrado e conectado com sucesso!" });
+          } else {
             setInviteStatus({ type: 'error', message: "Este email pertence a um Personal Trainer." });
-            setIsInviting(false);
-            return;
           }
-          await addClient(clientUser.id);
-          setInviteStatus({ type: 'success', message: "Aluno encontrado e conectado com sucesso!" });
         } else {
-          console.log("Usuário não encontrado");
+          console.log("Usuário não encontrado no Firestore para o email:", inviteEmail.trim().toLowerCase());
           setInviteStatus({ type: 'error', message: "Aluno não encontrado com este email. Use a opção 'Convidar Novo Aluno'." });
         }
       } else {
         // 2. Create a pending invitation
-        console.log("Criando convite pendente...");
+        console.log("Criando novo convite pendente para:", inviteEmail.trim().toLowerCase());
         await addDoc(collection(db, "invitations"), {
-          personal_id: user.id,
-          personal_name: user.displayName || user.name || "Personal",
-          email: inviteEmail.trim().toLowerCase(),
+          personalId: user.id,
+          personalName: user.displayName || user.name || "Personal",
+          studentEmail: inviteEmail.trim().toLowerCase(),
           status: "pending",
           createdAt: new Date().toISOString()
         }).catch(err => {
-          console.error("Erro ao criar convite:", err);
+          console.error("Erro ao criar convite no Firestore:", err);
           handleFirestoreError(err, OperationType.CREATE, "invitations");
         });
         setInviteStatus({ type: 'success', message: "Convite enviado para o email informado!" });
       }
       setInviteEmail("");
-    } catch (err) {
-      console.error("Erro geral no sendInvite:", err);
-      setInviteStatus({ type: 'error', message: "Erro ao enviar convite. Verifique as permissões ou tente novamente." });
+    } catch (err: any) {
+      console.error("Erro capturado no catch do sendInvite:", err);
+      const errorMessage = err.message || "Erro desconhecido";
+      setInviteStatus({ type: 'error', message: `Erro ao enviar convite: ${errorMessage}. Verifique as permissões.` });
     } finally {
       setIsInviting(false);
       setTimeout(() => setInviteStatus(null), 5000);
@@ -2166,8 +2235,28 @@ function ClientWorkoutView({ workout, onBack, isPersonal: isPersonalProp }: { wo
 
   const [activeTimer, setActiveTimer] = useState<string | null>(null);
   const [timeLeft, setTimeLeft] = useState(0);
-  
-  // Initialize state from localStorage if available, otherwise from workout prop
+  const [exercises, setExercises] = useState<any[]>(workout.exercises || []);
+  const [loadingExercises, setLoadingExercises] = useState(!workout.exercises);
+
+  useEffect(() => {
+    if (!workout.exercises) {
+      const fetchExercises = async () => {
+        try {
+          const q = query(collection(db, "exercises"), where("workoutId", "==", workout.id));
+          const snapshot = await getDocs(q);
+          const exData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+          // Sort manually if order field exists
+          exData.sort((a: any, b: any) => (a.order || 0) - (b.order || 0));
+          setExercises(exData);
+        } catch (err) {
+          console.error("Error fetching exercises:", err);
+        } finally {
+          setLoadingExercises(false);
+        }
+      };
+      fetchExercises();
+    }
+  }, [workout.id]);
   const [completedExercises, setCompletedExercises] = useState<string[]>(() => {
     const saved = localStorage.getItem(storageKey);
     if (saved && workout.status !== 'completed') {
@@ -2273,18 +2362,18 @@ function ClientWorkoutView({ workout, onBack, isPersonal: isPersonalProp }: { wo
   if (isEditing) {
     return (
       <WorkoutBuilder 
-        client={{ id: workout.client_id, name: "Aluno" }} 
+        client={{ id: workout.studentId, name: "Aluno" }} 
         onBack={() => setIsEditing(false)} 
         existingWorkout={workout}
-        personalOverrideId={isSuperAdmin ? workout.personal_id : undefined}
+        personalOverrideId={isSuperAdmin ? workout.personalId : undefined}
       />
     );
   }
 
   useEffect(() => {
     const fetchRecipient = async () => {
-      const recipientId = isPersonal ? workout.client_id : workout.personal_id;
-      const docRef = doc(db, "users", recipientId);
+      const recipientId = isPersonal ? workout.studentId : workout.personalId;
+      const docRef = doc(db, "users_public", recipientId);
       const docSnap = await getDoc(docRef);
       if (docSnap.exists()) {
         const data = docSnap.data();
@@ -2292,7 +2381,7 @@ function ClientWorkoutView({ workout, onBack, isPersonal: isPersonalProp }: { wo
       }
     };
     fetchRecipient();
-  }, [isPersonal, workout.client_id, workout.personal_id]);
+  }, [isPersonal, workout.studentId, workout.personalId]);
 
   const deleteWorkout = async () => {
     console.log("ClientWorkoutView: Deleting workout:", workout.id);
@@ -2438,7 +2527,7 @@ function ClientWorkoutView({ workout, onBack, isPersonal: isPersonalProp }: { wo
           )}
           <button
             onClick={() => setChatRoom({ 
-              id: isPersonal ? `chat_${user?.id}_${workout.client_id}` : `chat_${workout.personal_id}_${user?.id}`, 
+              id: isPersonal ? `chat_${user?.id}_${workout.studentId}` : `chat_${workout.personalId}_${user?.id}`, 
               name: recipientName 
             })}
             className="flex items-center gap-2 bg-orange-600/10 hover:bg-orange-600 text-orange-500 hover:text-white px-3 py-2 rounded-xl border border-orange-500/20 transition-all font-bold text-xs"
@@ -2512,7 +2601,17 @@ function ClientWorkoutView({ workout, onBack, isPersonal: isPersonalProp }: { wo
       )}
 
       <div className="grid gap-6">
-        {workout.exercises.map((ex: any, index: number) => {
+        {loadingExercises ? (
+          <div className="text-center py-12">
+            <div className="w-8 h-8 border-2 border-orange-500/20 border-t-orange-500 rounded-full animate-spin mx-auto mb-4"></div>
+            <p className="text-neutral-500 text-sm">Carregando exercícios...</p>
+          </div>
+        ) : exercises.length === 0 ? (
+          <div className="text-center py-12 bg-neutral-900 rounded-2xl border border-white/10">
+            <p className="text-neutral-500">Nenhum exercício encontrado para este treino.</p>
+          </div>
+        ) : (
+          exercises.map((ex: any, index: number) => {
           const isExCompleted = completedExercises.includes(ex.id);
           return (
             <div 
@@ -2665,7 +2764,7 @@ function ClientWorkoutView({ workout, onBack, isPersonal: isPersonalProp }: { wo
               </div>
             </div>
           );
-        })}
+        }))}
       </div>
 
       <div className="bg-neutral-900 rounded-2xl border border-white/10 shadow-2xl p-6 mt-8">
@@ -2797,16 +2896,16 @@ function ClientDashboard({ onViewAllWorkouts, onViewSubscriptions }: { onViewAll
 
   const fetchWorkouts = async () => {
     if (!user) return;
-    const q = query(collection(db, "workouts"), where("client_id", "==", user.id));
+    const q = query(collection(db, "workouts"), where("studentId", "==", user.id));
     const querySnapshot = await getDocs(q);
     let workoutsData = querySnapshot.docs.map(doc => ({ id: doc.id, ...(doc.data() as any) }));
     
     // Filter out workouts from personals who blocked the client
-    const connectionsQ = query(collection(db, "connections"), where("client_id", "==", user.id), where("status", "==", "blocked"));
+    const connectionsQ = query(collection(db, "connections"), where("studentId", "==", user.id), where("status", "==", "blocked"));
     const connectionsSnapshot = await getDocs(connectionsQ);
-    const blockedPersonalIds = connectionsSnapshot.docs.map(doc => doc.data().personal_id);
+    const blockedPersonalIds = connectionsSnapshot.docs.map(doc => doc.data().personalId);
     
-    workoutsData = workoutsData.filter(w => !blockedPersonalIds.includes(w.personal_id));
+    workoutsData = workoutsData.filter(w => !blockedPersonalIds.includes(w.personalId));
 
     // Sort by date descending
     workoutsData.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
@@ -2815,12 +2914,12 @@ function ClientDashboard({ onViewAllWorkouts, onViewSubscriptions }: { onViewAll
 
   const fetchPersonals = async () => {
     if (!user) return;
-    const q = query(collection(db, "connections"), where("client_id", "==", user.id));
+    const q = query(collection(db, "connections"), where("studentId", "==", user.id));
     const querySnapshot = await getDocs(q);
     
     const personalPromises = querySnapshot.docs.map(async (connectionDoc) => {
       const data = connectionDoc.data();
-      const personalDoc = await getDoc(doc(db, "users", data.personal_id));
+      const personalDoc = await getDoc(doc(db, "users_public", data.personalId));
       return { id: personalDoc.id, ...personalDoc.data(), status: data.status };
     });
     
@@ -2839,7 +2938,7 @@ function ClientDashboard({ onViewAllWorkouts, onViewSubscriptions }: { onViewAll
 
     try {
       const q = query(
-        collection(db, "users"), 
+        collection(db, "users_public"), 
         where("role", "==", "personal"), 
         where("personalCode", "==", personalCode.trim().toUpperCase())
       );
@@ -2857,8 +2956,8 @@ function ClientDashboard({ onViewAllWorkouts, onViewSubscriptions }: { onViewAll
       // Check if already connected
       const connQ = query(
         collection(db, "connections"),
-        where("personal_id", "==", personalId),
-        where("client_id", "==", user.id)
+        where("personalId", "==", personalId),
+        where("studentId", "==", user.id)
       );
       const connSnapshot = await getDocs(connQ);
 
@@ -2869,8 +2968,8 @@ function ClientDashboard({ onViewAllWorkouts, onViewSubscriptions }: { onViewAll
       }
 
       await addDoc(collection(db, "connections"), {
-        personal_id: personalId,
-        client_id: user.id,
+        personalId: personalId,
+        studentId: user.id,
         status: "active",
         createdAt: new Date().toISOString()
       });
@@ -3504,7 +3603,7 @@ function ClientWorkoutsTab({ userOverride = null }: { userOverride?: UserType | 
 
   const checkBlockedStatus = async () => {
     if (!user) return;
-    const q = query(collection(db, "connections"), where("client_id", "==", user.id), where("status", "==", "blocked"));
+    const q = query(collection(db, "connections"), where("studentId", "==", user.id), where("status", "==", "blocked"));
     const snapshot = await getDocs(q);
     setIsBlocked(!snapshot.empty);
   };
@@ -3513,15 +3612,15 @@ function ClientWorkoutsTab({ userOverride = null }: { userOverride?: UserType | 
     if (!user) return;
     setLoading(true);
     try {
-      const q = query(collection(db, "workouts"), where("client_id", "==", user.id));
+      const q = query(collection(db, "workouts"), where("studentId", "==", user.id));
       const querySnapshot = await getDocs(q);
       let workoutsData = querySnapshot.docs.map(doc => ({ id: doc.id, ...(doc.data() as any) }));
       
-      const connectionsQ = query(collection(db, "connections"), where("client_id", "==", user.id), where("status", "==", "blocked"));
+      const connectionsQ = query(collection(db, "connections"), where("studentId", "==", user.id), where("status", "==", "blocked"));
       const connectionsSnapshot = await getDocs(connectionsQ);
-      const blockedPersonalIds = connectionsSnapshot.docs.map(doc => doc.data().personal_id);
+      const blockedPersonalIds = connectionsSnapshot.docs.map(doc => doc.data().personalId);
       
-      workoutsData = workoutsData.filter(w => !blockedPersonalIds.includes(w.personal_id));
+      workoutsData = workoutsData.filter(w => !blockedPersonalIds.includes(w.personalId));
       workoutsData.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
       setWorkouts(workoutsData);
     } catch (error) {
@@ -3663,16 +3762,16 @@ function ClientHistoryTab() {
     if (!user) return;
     setLoading(true);
     try {
-      const q = query(collection(db, "workouts"), where("client_id", "==", user.id));
+      const q = query(collection(db, "workouts"), where("studentId", "==", user.id));
       const querySnapshot = await getDocs(q);
       let workoutsData = querySnapshot.docs.map(doc => ({ id: doc.id, ...(doc.data() as any) }));
       
       // Filter out workouts from personals who blocked the client
-      const connectionsQ = query(collection(db, "connections"), where("client_id", "==", user.id), where("status", "==", "blocked"));
+      const connectionsQ = query(collection(db, "connections"), where("studentId", "==", user.id), where("status", "==", "blocked"));
       const connectionsSnapshot = await getDocs(connectionsQ);
-      const blockedPersonalIds = connectionsSnapshot.docs.map(doc => doc.data().personal_id);
+      const blockedPersonalIds = connectionsSnapshot.docs.map(doc => doc.data().personalId);
       
-      workoutsData = workoutsData.filter(w => !blockedPersonalIds.includes(w.personal_id));
+      workoutsData = workoutsData.filter(w => !blockedPersonalIds.includes(w.personalId));
       workoutsData.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
       setWorkouts(workoutsData);
     } catch (error) {
@@ -3754,10 +3853,10 @@ function SuperAdminDashboard() {
   const [users, setUsers] = useState<UserType[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
-  const [filterRole, setFilterRole] = useState<"all" | "personal" | "client" | "superadmin">("all");
+  const [filterRole, setFilterRole] = useState<"all" | "personal" | "student" | "superadmin">("all");
   const [globalMessage, setGlobalMessage] = useState("");
   const [maxViews, setMaxViews] = useState(1);
-  const [messageTarget, setMessageTarget] = useState<"all" | "personal" | "client">("all");
+  const [messageTarget, setMessageTarget] = useState<"all" | "personal" | "student">("all");
   const [systemMessages, setSystemMessages] = useState<any[]>([]);
   const [isSending, setIsSending] = useState(false);
   const [editingUser, setEditingUser] = useState<UserType | null>(null);
@@ -3765,16 +3864,22 @@ function SuperAdminDashboard() {
   const [activeTab, setActiveTab] = useState<"users" | "hierarchy" | "messages">("users");
   const [connections, setConnections] = useState<any[]>([]);
 
+  const { user } = useAuth();
+
   useEffect(() => {
-    fetchUsers();
-    fetchSystemMessages();
-    fetchConnections();
-  }, []);
+    if (user?.role === "superadmin") {
+      fetchUsers();
+      fetchSystemMessages();
+      fetchConnections();
+    }
+  }, [user]);
 
   const refreshData = () => {
-    fetchUsers();
-    fetchConnections();
-    fetchSystemMessages();
+    if (user?.role === "superadmin") {
+      fetchUsers();
+      fetchConnections();
+      fetchSystemMessages();
+    }
   };
 
   const fetchConnections = async () => {
@@ -3791,7 +3896,7 @@ function SuperAdminDashboard() {
   const disconnectClient = async (personalId: string, clientId: string) => {
     if (!window.confirm("Deseja realmente desvincular este aluno deste personal?")) return;
     try {
-      const q = query(collection(db, "connections"), where("personal_id", "==", personalId), where("client_id", "==", clientId));
+      const q = query(collection(db, "connections"), where("personalId", "==", personalId), where("studentId", "==", clientId));
       const snapshot = await getDocs(q);
       const deletePromises = snapshot.docs.map(doc => deleteDoc(doc.ref));
       await Promise.all(deletePromises);
@@ -3809,7 +3914,7 @@ function SuperAdminDashboard() {
       const msgs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setSystemMessages(msgs);
     }, (error) => {
-      handleFirestoreError(error, OperationType.GET, "system_messages");
+      handleFirestoreError(error, OperationType.LIST, "system_messages");
     });
     return unsubscribe;
   };
@@ -3817,7 +3922,7 @@ function SuperAdminDashboard() {
   const fetchUsers = async () => {
     setLoading(true);
     try {
-      const q = query(collection(db, "users"));
+      const q = query(collection(db, "users_public"));
       const snapshot = await getDocs(q);
       const usersData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as UserType));
       setUsers(usersData);
@@ -3828,9 +3933,9 @@ function SuperAdminDashboard() {
     }
   };
 
-  const updateUserRole = async (userId: string, newRole: "personal" | "client") => {
+  const updateUserRole = async (userId: string, newRole: "personal" | "student") => {
     try {
-      await updateDoc(doc(db, "users", userId), { role: newRole });
+      await updateDoc(doc(db, "users_public", userId), { role: newRole });
       setUsers(prev => prev.map(u => u.id === userId ? { ...u, role: newRole } : u));
       alert("Role atualizada com sucesso!");
     } catch (error) {
@@ -3841,7 +3946,7 @@ function SuperAdminDashboard() {
 
   const toggleBlockUser = async (userId: string, currentStatus: boolean) => {
     try {
-      await updateDoc(doc(db, "users", userId), { blocked: !currentStatus });
+      await updateDoc(doc(db, "users_public", userId), { blocked: !currentStatus });
       setUsers(prev => prev.map(u => u.id === userId ? { ...u, blocked: !currentStatus } : u));
       alert(currentStatus ? "Usuário desbloqueado!" : "Usuário bloqueado!");
     } catch (error) {
@@ -3908,7 +4013,7 @@ function SuperAdminDashboard() {
   });
 
   const personals = filteredUsers.filter(u => u.role === "personal");
-  const clients = filteredUsers.filter(u => u.role === "client");
+  const clients = filteredUsers.filter(u => u.role === "student");
   const admins = filteredUsers.filter(u => u.role === "superadmin");
 
   const onlineClientsCount = connections.filter(c => c.type === "online").length;
@@ -4027,7 +4132,7 @@ function SuperAdminDashboard() {
               >
                 <option value="all">Todos os Usuários</option>
                 <option value="personal">Apenas Personals</option>
-                <option value="client">Apenas Alunos</option>
+                <option value="student">Apenas Alunos</option>
               </select>
               <input 
                 type="text"
@@ -4146,7 +4251,7 @@ function SuperAdminDashboard() {
                 <div className="bg-neutral-900 p-4 rounded-2xl border border-white/10 flex items-center gap-3">
                   <span className="text-xs font-bold text-neutral-500 uppercase tracking-widest whitespace-nowrap">Filtrar:</span>
                   <div className="flex bg-neutral-800 p-1 rounded-lg border border-white/5 w-full">
-                    {(["all", "personal", "client", "superadmin"] as const).map((r) => (
+                    {(["all", "personal", "student", "superadmin"] as const).map((r) => (
                       <button
                         key={r}
                         onClick={() => setFilterRole(r)}
@@ -4154,7 +4259,7 @@ function SuperAdminDashboard() {
                           filterRole === r ? "bg-orange-600 text-white shadow-lg" : "text-neutral-500 hover:text-white"
                         }`}
                       >
-                        {r === "all" ? "Todos" : r === "client" ? "Alunos" : r}
+                        {r === "all" ? "Todos" : r === "student" ? "Alunos" : r}
                       </button>
                     ))}
                   </div>
@@ -4179,7 +4284,7 @@ function SuperAdminDashboard() {
                   )}
 
                   {/* Clients Section */}
-                  {(filterRole === "all" || filterRole === "client") && clients.length > 0 && (
+                  {(filterRole === "all" || filterRole === "student") && clients.length > 0 && (
                     <UserTable 
                       title="Alunos" 
                       users={clients} 
@@ -4221,8 +4326,8 @@ function SuperAdminDashboard() {
           ) : (
             <div className="grid grid-cols-1 gap-6">
               {users.filter(u => u.role === "personal").map(personal => {
-                const personalConnections = connections.filter(c => c.personal_id === personal.id);
-                const associatedClients = users.filter(u => u.role === "client" && personalConnections.some(c => c.client_id === u.id));
+                const personalConnections = connections.filter(c => c.personalId === personal.id);
+                const associatedClients = users.filter(u => u.role === "student" && personalConnections.some(c => c.studentId === u.id));
                 return (
                   <div key={personal.id} className="bg-neutral-900 rounded-2xl border border-white/10 overflow-hidden shadow-xl">
                     <div className="p-6 bg-neutral-800/50 border-b border-white/5 flex items-center justify-between">
@@ -4348,7 +4453,7 @@ function UserTable({ title, users, onEdit, icon }: {
                       user.role === 'personal' ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20' :
                       'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
                     }`}>
-                      {user.role === 'client' ? 'Aluno' : user.role}
+                      {user.role === 'student' ? 'Aluno' : user.role}
                     </span>
                   </td>
                   <td className="px-6 py-4">
@@ -4388,7 +4493,7 @@ function AdminUserEditView({
 }: { 
   user: UserType, 
   onClose: () => void,
-  onUpdateRole: (id: string, role: "personal" | "client") => void,
+  onUpdateRole: (id: string, role: "personal" | "student") => void,
   onToggleBlock: (id: string, current: boolean) => void,
   onSendMessage: (id: string) => void,
   onImpersonate: (user: UserType) => void,
@@ -4452,12 +4557,12 @@ function AdminUserEditView({
                   onChange={(e) => onUpdateRole(user.id, e.target.value as any)}
                   className="w-full bg-neutral-800 border border-white/5 text-white text-sm rounded-xl px-4 py-3 focus:ring-orange-500 outline-none transition-all"
                 >
-                  <option value="client">Aluno</option>
+                  <option value="student">Aluno</option>
                   <option value="personal">Personal</option>
                 </select>
               </div>
 
-              {user.role === "client" && userConnection && (
+              {user.role === "student" && userConnection && (
                 <div className="flex flex-col gap-2">
                   <label className="text-[10px] font-bold text-neutral-500 uppercase tracking-widest">Classificação</label>
                   <div className="grid grid-cols-2 gap-2">
@@ -4540,7 +4645,7 @@ function AdminUserEditView({
 
         {/* Content Section (Workouts or Profile) */}
         <div className="lg:col-span-2 space-y-6">
-          {user.role === 'client' ? (
+          {user.role === 'student' ? (
             <div className="bg-neutral-900 rounded-3xl border border-white/10 shadow-2xl overflow-hidden">
               <div className="p-6 border-b border-white/5 flex items-center gap-3">
                 <Dumbbell className="w-5 h-5 text-orange-500" />
@@ -4601,23 +4706,14 @@ function SystemBanner() {
     if (!user) return;
     const q = query(collection(db, "system_messages"), where("active", "==", true));
     const unsubscribe = onSnapshot(q, (snapshot) => {
+      const storageKey = `system_msg_views_${user.id}`;
+      const viewStats = JSON.parse(localStorage.getItem(storageKey) || "{}");
       const msgs = snapshot.docs
         .map(doc => ({ id: doc.id, ...doc.data() }))
-        .filter((msg: any) => {
-          // Check target
-          const isTarget = msg.target === "all" || msg.target === user.role || msg.target === user.id;
-          if (!isTarget) return false;
-
-          // Check view count in localStorage
-          const viewStats = JSON.parse(localStorage.getItem(`system_msg_views_${user.id}`) || "{}");
-          const currentViews = viewStats[msg.id] || 0;
-          const maxViews = msg.maxViews || 1;
-
-          return currentViews < maxViews;
-        });
+        .filter(msg => (viewStats[msg.id] || 0) < 3);
       setMessages(msgs);
     }, (error) => {
-      handleFirestoreError(error, OperationType.GET, "system_messages");
+      handleFirestoreError(error, OperationType.LIST, "system_messages");
     });
     return () => unsubscribe();
   }, [user]);
@@ -4661,55 +4757,42 @@ function Dashboard() {
     
     const roomUnsubscribes = new Map<string, () => void>();
     
-    const roleField = user.role === 'personal' ? 'personal_id' : 'client_id';
+    const roleField = user.role === 'personal' ? 'personalId' : 'studentId';
     const connectionsQ = query(collection(db, "connections"), where(roleField, "==", user.id));
     
+    const roomUnreadCounts = new Map<string, number>();
+    
     const unsubConnections = onSnapshot(connectionsQ, (snapshot) => {
-      snapshot.docChanges().forEach((change) => {
-        const data = change.doc.data();
-        const roomId = `chat_${data.personal_id}_${data.client_id}`;
+      const currentConnections = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as any[];
+      
+      // Clear old unsubscribes
+      roomUnsubscribes.forEach(unsub => unsub());
+      roomUnsubscribes.clear();
+      roomUnreadCounts.clear();
+      
+      currentConnections.forEach((conn: any) => {
+        const roomId = user.role === 'personal' 
+          ? `${user.id}_${conn.studentId}`
+          : `${conn.personalId}_${user.id}`;
+          
+        const messagesQ = query(
+          collection(db, "chats", roomId, "messages"),
+          where("read", "==", false),
+          where("senderId", "!=", user.id)
+        );
         
-        if (change.type === "added") {
-          if (!roomUnsubscribes.has(roomId)) {
-            const mq = query(
-              collection(db, "chats", roomId, "messages"),
-              orderBy("createdAt", "desc"),
-              limit(1)
-            );
-            
-            let isInitial = true;
-            const unsub = onSnapshot(mq, (mSnapshot) => {
-              if (isInitial) {
-                isInitial = false;
-                return;
-              }
-              
-              mSnapshot.docChanges().forEach((mChange) => {
-                if (mChange.type === "added") {
-                  const msg = mChange.doc.data();
-                  if (msg.senderId !== user.id) {
-                    setHasUnreadMessages(true);
-                    const audio = new Audio('https://cdn.pixabay.com/audio/2022/03/10/audio_c35078174a.mp3');
-                    audio.volume = 0.3;
-                    audio.play().catch(() => {});
-                  }
-                }
-              });
-            }, (error) => {
-              handleFirestoreError(error, OperationType.GET, `chats/${roomId}/messages`);
-            });
-            roomUnsubscribes.set(roomId, unsub);
-          }
-        } else if (change.type === "removed") {
-          const unsub = roomUnsubscribes.get(roomId);
-          if (unsub) {
-            unsub();
-            roomUnsubscribes.delete(roomId);
-          }
-        }
+        const unsubRoom = onSnapshot(messagesQ, (msgSnapshot) => {
+          roomUnreadCounts.set(roomId, msgSnapshot.size);
+          const totalUnread = Array.from(roomUnreadCounts.values()).reduce((a, b) => a + b, 0);
+          setHasUnreadMessages(totalUnread > 0);
+        }, (err) => {
+          console.error(`Erro ao ouvir mensagens da sala ${roomId}:`, err);
+        });
+        
+        roomUnsubscribes.set(roomId, unsubRoom);
       });
     }, (error) => {
-      handleFirestoreError(error, OperationType.GET, "connections");
+      handleFirestoreError(error, OperationType.LIST, "connections");
     });
     
     return () => {
@@ -4761,7 +4844,7 @@ function Dashboard() {
                 >
                   Treinos
                 </button>
-                {user.role === "client" && (
+                {user.role === "student" && (
                   <>
                     <button 
                       onClick={() => setActiveTab("history")}
@@ -4856,7 +4939,7 @@ function Dashboard() {
           user.role === "personal" ? <PersonalDashboard /> : 
           <ClientDashboard onViewAllWorkouts={() => setActiveTab("workouts")} onViewSubscriptions={() => setActiveTab("subscriptions")} />
         )}
-        {activeTab === "workouts" && (user.role === "client" ? (
+        {activeTab === "workouts" && (user.role === "student" ? (
           <ClientWorkoutsTab />
         ) : (
           <div className="bg-neutral-900 p-12 rounded-2xl border border-white/10 text-center">
@@ -4867,10 +4950,10 @@ function Dashboard() {
             </p>
           </div>
         ))}
-        {activeTab === "history" && user.role === "client" && (
+        {activeTab === "history" && user.role === "student" && (
           <ClientHistoryTab />
         )}
-        {activeTab === "assessments" && user.role === "client" && (
+        {activeTab === "assessments" && user.role === "student" && (
           <AssessmentView 
             clientId={user.id} 
             clientName={user.name} 
@@ -4878,7 +4961,7 @@ function Dashboard() {
             isPersonal={false} 
           />
         )}
-        {activeTab === "subscriptions" && user.role === "client" && (
+        {activeTab === "subscriptions" && user.role === "student" && (
           <SubscriptionsView onBack={() => setActiveTab("home")} />
         )}
         {activeTab === "profile" && (
@@ -4985,7 +5068,7 @@ function Dashboard() {
             <Activity className="w-5 h-5" />
             <span className="text-[10px] font-medium">Treinos</span>
           </button>
-          {user.role === "client" && (
+          {user.role === "student" && (
             <button 
               onClick={() => setActiveTab("history")}
               className={`flex flex-col items-center justify-center w-full h-full space-y-1 ${activeTab === "history" ? "text-orange-500" : "text-neutral-500"}`}
@@ -4994,7 +5077,7 @@ function Dashboard() {
               <span className="text-[10px] font-medium">Histórico</span>
             </button>
           )}
-          {user.role === "client" && (
+          {user.role === "student" && (
             <button 
               onClick={() => setActiveTab("assessments")}
               className={`flex flex-col items-center justify-center w-full h-full space-y-1 ${activeTab === "assessments" ? "text-orange-500" : "text-neutral-500"}`}

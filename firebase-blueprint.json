@@ -1,82 +1,178 @@
 {
   "entities": {
-    "User": {
-      "title": "User Profile",
-      "description": "User profile information for both trainers and clients.",
+    "UserPublic": {
+      "title": "Public User Profile",
+      "description": "Publicly accessible user information.",
       "type": "object",
       "properties": {
-        "name": { "type": "string", "description": "Full name of the user." },
-        "email": { "type": "string", "format": "email", "description": "Email address." },
-        "role": { "type": "string", "enum": ["personal", "client", "superadmin"], "description": "User's role in the system." },
-        "personalCode": { "type": "string", "description": "Unique code for personal trainers." },
-        "profileCompleted": { "type": "boolean", "description": "Whether the user has completed their profile." },
-        "blocked": { "type": "boolean", "description": "Whether the user is blocked from the system." }
+        "name": { "type": "string" },
+        "photoUrl": { "type": "string" },
+        "city": { "type": "string" },
+        "role": { "type": "string", "enum": ["personal", "student"] }
       },
-      "required": ["name", "email", "role"]
+      "required": ["name", "role"]
+    },
+    "UserPrivate": {
+      "title": "Private User Data",
+      "description": "Sensitive user information accessible only by the owner.",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string", "format": "email" },
+        "cpf": { "type": "string" },
+        "medicalHistory": { "type": "string" },
+        "medications": { "type": "string" }
+      },
+      "required": ["email"]
+    },
+    "UserEmail": {
+      "title": "Email Lookup",
+      "description": "Mapping from email to UID for fast lookups.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" }
+      },
+      "required": ["uid"]
     },
     "Connection": {
-      "title": "Trainer-Client Connection",
-      "description": "Represents a link between a personal trainer and a client.",
+      "title": "Trainer-Student Connection",
+      "description": "Represents a link between a personal trainer and a student.",
       "type": "object",
       "properties": {
-        "personal_id": { "type": "string", "description": "UID of the personal trainer." },
-        "client_id": { "type": "string", "description": "UID of the client." },
-        "status": { "type": "string", "enum": ["active", "blocked", "pending"], "description": "Status of the connection." }
+        "personalId": { "type": "string" },
+        "studentId": { "type": "string" },
+        "status": { "type": "string", "enum": ["active", "blocked", "pending"] },
+        "createdAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["personal_id", "client_id", "status"]
+      "required": ["personalId", "studentId", "status", "createdAt"]
+    },
+    "Invitation": {
+      "title": "Invitation",
+      "description": "Invitation sent by a trainer to a student.",
+      "type": "object",
+      "properties": {
+        "personalId": { "type": "string" },
+        "studentEmail": { "type": "string" },
+        "studentId": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "accepted", "rejected"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["personalId", "studentEmail", "status", "createdAt"]
     },
     "Workout": {
       "title": "Workout Plan",
-      "description": "A workout plan assigned to a client by a trainer.",
+      "description": "A workout plan assigned to a student.",
       "type": "object",
       "properties": {
-        "client_id": { "type": "string", "description": "UID of the client." },
-        "personal_id": { "type": "string", "description": "UID of the personal trainer." },
-        "date": { "type": "string", "format": "date-time", "description": "Date of the workout." },
-        "exercises": { "type": "array", "description": "List of exercises in the workout." }
+        "personalId": { "type": "string" },
+        "studentId": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["client_id", "personal_id", "date"]
+      "required": ["personalId", "studentId", "title", "createdAt"]
+    },
+    "Exercise": {
+      "title": "Exercise",
+      "description": "An exercise within a workout.",
+      "type": "object",
+      "properties": {
+        "workoutId": { "type": "string" },
+        "name": { "type": "string" },
+        "sets": { "type": "string" },
+        "reps": { "type": "string" },
+        "rest": { "type": "string" }
+      },
+      "required": ["workoutId", "name"]
+    },
+    "Assessment": {
+      "title": "Physical Assessment",
+      "description": "Physical assessment data for a student.",
+      "type": "object",
+      "properties": {
+        "studentId": { "type": "string" },
+        "personalId": { "type": "string" },
+        "weight": { "type": "number" },
+        "bodyFat": { "type": "number" },
+        "notes": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["studentId", "personalId", "createdAt"]
+    },
+    "Chat": {
+      "title": "Chat Room",
+      "description": "A chat room between participants.",
+      "type": "object",
+      "properties": {
+        "participants": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["participants"]
     },
     "Message": {
       "title": "Chat Message",
       "description": "A single message in a chat room.",
       "type": "object",
       "properties": {
-        "text": { "type": "string", "description": "Content of the message." },
-        "senderId": { "type": "string", "description": "UID of the sender." },
-        "createdAt": { "type": "string", "format": "date-time", "description": "Timestamp of the message." }
+        "senderId": { "type": "string" },
+        "text": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["text", "senderId", "createdAt"]
+      "required": ["senderId", "text", "createdAt"]
+    },
+    "SystemMessage": {
+      "title": "System Message",
+      "description": "System-wide message.",
+      "type": "object",
+      "properties": {
+        "text": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["text", "createdAt"]
     }
   },
   "firestore": {
-    "/users/{userId}": {
-      "schema": "User",
-      "description": "User profile documents."
+    "/users_public/{uid}": {
+      "schema": "UserPublic",
+      "description": "Public user profiles."
+    },
+    "/users_private/{uid}": {
+      "schema": "UserPrivate",
+      "description": "Private user data."
+    },
+    "/user_emails/{email}": {
+      "schema": "UserEmail",
+      "description": "Email to UID mapping."
     },
     "/connections/{connectionId}": {
       "schema": "Connection",
-      "description": "Trainer-client connection documents."
+      "description": "Trainer-student connections."
+    },
+    "/invitations/{invitationId}": {
+      "schema": "Invitation",
+      "description": "Invitations."
     },
     "/workouts/{workoutId}": {
       "schema": "Workout",
-      "description": "Workout plan documents."
+      "description": "Workout plans."
     },
-    "/chats/{roomId}/messages/{messageId}": {
-      "schema": "Message",
-      "description": "Messages within a chat room."
+    "/exercises/{exerciseId}": {
+      "schema": "Exercise",
+      "description": "Exercises."
     },
     "/assessments/{assessmentId}": {
-      "schema": "object",
-      "description": "Physical assessment documents."
+      "schema": "Assessment",
+      "description": "Physical assessments."
     },
-    "/invitations/{invitationId}": {
-      "schema": "object",
-      "description": "Invitations sent by trainers."
+    "/chats/{chatId}": {
+      "schema": "Chat",
+      "description": "Chat rooms."
+    },
+    "/chats/{chatId}/messages/{messageId}": {
+      "schema": "Message",
+      "description": "Messages in a chat room."
     },
     "/system_messages/{messageId}": {
-      "schema": "object",
-      "description": "System-wide messages from superadmin."
+      "schema": "SystemMessage",
+      "description": "System messages."
     }
   }
 }

@@ -8,11 +8,13 @@ export type UserType = {
   id: string;
   name: string;
   email: string;
-  role: "personal" | "client" | "superadmin";
-  personalCode?: string;
-  profileCompleted?: boolean;
-  displayName?: string;
+  role: "personal" | "student" | "superadmin";
   photoUrl?: string;
+  city?: string;
+  cpf?: string;
+  medicalHistory?: string;
+  medications?: string;
+  profileCompleted?: boolean;
   blocked?: boolean;
   [key: string]: any;
 };
@@ -43,37 +45,64 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (firebaseUser) {
         console.log("AuthProvider: Autenticado no Firebase Auth:", firebaseUser.uid);
         
-        // Pequeno delay para garantir que o Firestore reconheça o token de autenticação
-        // Isso evita o erro "Missing or insufficient permissions" no primeiro carregamento
-        setTimeout(() => {
-          const userDocRef = doc(db, "users", firebaseUser.uid);
-          const unsubscribeDoc = onSnapshot(userDocRef, (docSnap) => {
-            if (docSnap.exists()) {
-              const userData = docSnap.data() as UserType;
-              if (userData.blocked) {
-                console.warn("AuthProvider: Usuário bloqueado.");
-                signOut(auth);
-                setUser(null);
-                alert("Sua conta foi bloqueada. Entre em contato com o administrador.");
-              } else {
-                console.log("AuthProvider: Perfil encontrado no Firestore.");
-                setUser({ ...userData, id: firebaseUser.uid });
-                setAuthError(null);
-              }
-            } else {
-              console.warn("AuthProvider: Perfil ainda não existe no Firestore.");
+        // Listen to public profile
+        const publicDocRef = doc(db, "users_public", firebaseUser.uid);
+        const privateDocRef = doc(db, "users_private", firebaseUser.uid);
+
+        let publicData: any = null;
+        let privateData: any = null;
+
+        const updateCombinedUser = () => {
+          if (publicData && privateData) {
+            if (publicData.blocked) {
+              console.warn("AuthProvider: Usuário bloqueado.");
+              signOut(auth);
               setUser(null);
+              alert("Sua conta foi bloqueada. Entre em contato com o administrador.");
+            } else {
+              setUser({
+                ...publicData,
+                ...privateData,
+                id: firebaseUser.uid,
+                role: publicData.role === "client" ? "student" : publicData.role // Map client to student if needed
+              });
+              setAuthError(null);
             }
             setLoading(false);
-          }, (error) => {
-            console.error("AuthProvider: Erro no onSnapshot do usuário:", error);
-            handleFirestoreError(error, OperationType.GET, `users/${firebaseUser.uid}`);
-          });
+          }
+        };
 
-          // Armazenar o unsubscribe do documento para limpeza posterior se necessário
-          // Nota: Como estamos dentro de um setTimeout, o retorno do useEffect original
-          // não capturará este unsubscribeDoc facilmente sem uma ref.
-        }, 200);
+        const unsubPublic = onSnapshot(publicDocRef, (docSnap) => {
+          if (docSnap.exists()) {
+            publicData = docSnap.data();
+            updateCombinedUser();
+          } else {
+            // Fallback for migration or new users
+            console.warn("AuthProvider: Perfil público não encontrado.");
+            setLoading(false);
+          }
+        }, (error) => {
+          handleFirestoreError(error, OperationType.GET, `users_public/${firebaseUser.uid}`);
+        });
+
+        const unsubPrivate = onSnapshot(privateDocRef, (docSnap) => {
+          if (docSnap.exists()) {
+            privateData = docSnap.data();
+            updateCombinedUser();
+          } else {
+            console.warn("AuthProvider: Perfil privado não encontrado.");
+            // If private doesn't exist yet, we might still be in registration
+            privateData = {}; 
+            updateCombinedUser();
+          }
+        }, (error) => {
+          handleFirestoreError(error, OperationType.GET, `users_private/${firebaseUser.uid}`);
+        });
+
+        return () => {
+          unsubPublic();
+          unsubPrivate();
+        };
       } else {
         console.log("AuthProvider: Nenhum usuário logado.");
         setUser(null);

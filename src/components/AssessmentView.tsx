@@ -33,7 +33,7 @@ export function AssessmentView({ clientId, clientName, onBack, isPersonal }: { c
   const fetchAssessments = async () => {
     const q = query(
       collection(db, "assessments"), 
-      where("client_id", "==", clientId)
+      where("studentId", "==", clientId)
     );
     const querySnapshot = await getDocs(q);
     const data = querySnapshot.docs.map(doc => ({ id: doc.id, ...(doc.data() as any) }));
@@ -77,7 +77,7 @@ export function AssessmentView({ clientId, clientName, onBack, isPersonal }: { c
       }
 
       await addDoc(collection(db, "assessments"), {
-        client_id: clientId,
+        studentId: clientId,
         date,
         weight: parseFloat(weight) || 0,
         height: parseFloat(height) || 0,
