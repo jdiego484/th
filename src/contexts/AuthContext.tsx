@@ -42,11 +42,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     console.log("AuthProvider: Iniciando monitoramento...");
     
+    let unsubPublic: (() => void) | null = null;
+    let unsubPrivate: (() => void) | null = null;
+
     const unsubscribeAuth = onAuthStateChanged(auth, (firebaseUser) => {
+      // Limpar listeners anteriores se existirem
+      if (unsubPublic) unsubPublic();
+      if (unsubPrivate) unsubPrivate();
+
       if (firebaseUser) {
         console.log("AuthProvider: Autenticado no Firebase Auth:", firebaseUser.uid);
         
-        // Listen to public profile
         const publicDocRef = doc(db, "users_public", firebaseUser.uid);
         const privateDocRef = doc(db, "users_private", firebaseUser.uid);
 
@@ -54,7 +60,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         let privateData: any = null;
 
         const updateCombinedUser = () => {
-          // We need publicData to define the user. privateData is optional but preferred.
           if (publicData) {
             if (publicData.blocked) {
               console.warn("AuthProvider: Usuário bloqueado.");
@@ -78,14 +83,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           }
         };
 
-        const unsubPublic = onSnapshot(publicDocRef, (docSnap) => {
+        unsubPublic = onSnapshot(publicDocRef, (docSnap) => {
           if (docSnap.exists()) {
             publicData = docSnap.data();
             updateCombinedUser();
           } else {
             console.warn("AuthProvider: Perfil público não encontrado.");
-            // If public doesn't exist, we can't really define the user role/name etc.
-            // But we might be in the middle of registration.
             setLoading(false);
           }
         }, (error) => {
@@ -94,7 +97,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setLoading(false);
         });
 
-        const unsubPrivate = onSnapshot(privateDocRef, (docSnap) => {
+        unsubPrivate = onSnapshot(privateDocRef, (docSnap) => {
           if (docSnap.exists()) {
             privateData = docSnap.data();
             updateCombinedUser();
@@ -105,16 +108,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           }
         }, (error) => {
           console.error("Error fetching private profile:", error);
-          // Don't block the whole app if private profile fails (might be permission issue if not owner)
-          // but here it's the owner fetching their own data, so it should work.
           privateData = {};
           updateCombinedUser();
         });
-
-        return () => {
-          unsubPublic();
-          unsubPrivate();
-        };
       } else {
         console.log("AuthProvider: Nenhum usuário logado.");
         setUser(null);
@@ -126,14 +122,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setLoading(false);
     });
 
-    return () => unsubscribeAuth();
+    return () => {
+      unsubscribeAuth();
+      if (unsubPublic) unsubPublic();
+      if (unsubPrivate) unsubPrivate();
+    };
   }, []);
 
   const logout = async () => {
     try {
+      console.log("AuthContext: Iniciando logout...");
+      // Limpar estado local primeiro para feedback imediato
+      setUser(null);
+      setLoading(true); // Mostrar loading durante o processo
+      
       await signOut(auth);
+      
+      console.log("AuthContext: Logout concluído, redirecionando...");
+      // Usar replace para evitar que o usuário volte para o dashboard com o botão voltar
+      window.location.replace("/login");
     } catch (error) {
       console.error("Erro ao deslogar:", error);
+      // Mesmo em caso de erro, forçamos a limpeza e o redirecionamento
+      setUser(null);
+      window.location.replace("/login");
     }
   };
 

@@ -44,6 +44,21 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
+    function isRecent(timestampStr) {
+      return timestampStr is string && 
+             timestampStr.matches("^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}.*Z?$") &&
+             timestamp(timestampStr) > request.time - duration.value(24, 'h') &&
+             timestamp(timestampStr) < request.time + duration.value(24, 'h');
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    function areImmutableFieldsUnchanged(fields) {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(fields);
+    }
+
     function isConnectedTrainer(studentId) {
       return isAuthenticated() && 
         exists(/databases/$(database)/documents/connections/$(request.auth.uid + "_" + studentId)) &&
@@ -58,28 +73,67 @@ service cloud.firestore {
     
     function isAdmin() {
       return isAuthenticated() && 
-        (request.auth.token.email == "jdiego484@gmail.com" || 
+        ((request.auth.token.email == "jdiego484@gmail.com" && request.auth.token.email_verified == true) || 
          (exists(/databases/$(database)/documents/users_public/$(request.auth.uid)) && 
           get(/databases/$(database)/documents/users_public/$(request.auth.uid)).data.role == "superadmin"));
     }
 
     function isValidUserPublic(data) {
-      return data.keys().hasAll(['name', 'role']) &&
+      return hasOnlyAllowedFields(['name', 'role', 'photoUrl', 'city', 'personalCode', 'profileCompleted', 'createdAt', 'gender', 'crefNumber', 'blocked', 'id']) &&
              data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
-             data.role in ['personal', 'student', 'superadmin', 'client'];
+             data.role in ['personal', 'student', 'superadmin', 'client'] &&
+             (!('photoUrl' in data) || (data.photoUrl is string && data.photoUrl.size() < 500)) &&
+             (!('city' in data) || (data.city is string && data.city.size() < 100));
     }
 
     function isValidUserPrivate(data) {
-      return data.keys().hasAll(['email']) &&
+      return hasOnlyAllowedFields(['email', 'phone', 'cpf', 'birthDate', 'cep', 'address', 'medicalHistory', 'medications', 'anamnesis']) &&
              data.email is string && data.email.size() > 0 && data.email.size() < 100 &&
-             (!('phone' in data) || (data.phone is string && data.phone.size() >= 2 && data.phone.size() < 20));
+             (!('phone' in data) || (data.phone is string && data.phone.size() >= 2 && data.phone.size() < 25)) &&
+             (!('cpf' in data) || (data.cpf is string && data.cpf.size() <= 14)) &&
+             (!('address' in data) || (data.address is string && data.address.size() < 200));
+    }
+
+    function isValidConnection(data) {
+      return hasOnlyAllowedFields(['personalId', 'studentId', 'status', 'createdAt', 'type', 'migrated']) &&
+             data.personalId is string && data.studentId is string &&
+             data.status in ['active', 'blocked', 'pending'] &&
+             isRecent(data.createdAt);
+    }
+
+    function isValidInvitation(data) {
+      return hasOnlyAllowedFields(['personalId', 'studentEmail', 'studentId', 'status', 'createdAt']) &&
+             data.personalId is string && data.studentEmail is string &&
+             data.status in ['pending', 'accepted', 'rejected'] &&
+             isRecent(data.createdAt);
+    }
+
+    function isValidWorkout(data) {
+      return hasOnlyAllowedFields(['personalId', 'studentId', 'title', 'description', 'date', 'status', 'createdAt', 'startTime', 'completedAt', 'exercises', 'feedback', 'loads', 'overallFeedback', 'id']) &&
+             data.personalId is string && data.studentId is string &&
+             data.title is string && data.title.size() > 0 && data.title.size() < 100 &&
+             (!('description' in data) || (data.description is string && data.description.size() < 1000)) &&
+             isRecent(data.createdAt);
+    }
+
+    function isValidAssessment(data) {
+      return hasOnlyAllowedFields(['studentId', 'personalId', 'createdAt', 'weight', 'bodyFat', 'notes', 'id', 'date', 'measurements']) &&
+             data.studentId is string && data.personalId is string &&
+             (!('notes' in data) || (data.notes is string && data.notes.size() < 2000)) &&
+             isRecent(data.createdAt);
+    }
+
+    function isValidSystemMessage(data) {
+      return hasOnlyAllowedFields(['text', 'createdAt', 'active', 'id']) &&
+             data.text is string && data.text.size() > 0 && data.text.size() < 1000 &&
+             isRecent(data.createdAt);
     }
 
     // ===============================================================
     // Rules
     // ===============================================================
 
-    // Legacy Users Collection (for safety during transition)
+    // Legacy Users Collection
     match /users/{userId} {
       allow read, write: if isOwner(userId) || isAdmin();
     }
@@ -94,7 +148,7 @@ service cloud.firestore {
 
     // Private User Data
     match /users_private/{uid} {
-      allow read: if isOwner(uid) || isConnectedTrainer(uid) || isAdmin();
+      allow read: if isOwner(uid) || isConnectedTrainer(uid) || isConnectedStudent(uid) || isAdmin();
       allow create: if isOwner(uid) && isValidUserPrivate(request.resource.data);
       allow update: if (isOwner(uid) && isValidUserPrivate(request.resource.data)) || isAdmin();
       allow delete: if isAdmin();
@@ -102,7 +156,7 @@ service cloud.firestore {
 
     // Email Lookup
     match /user_emails/{email} {
-      allow read: if isAuthenticated();
+      allow read: if isAuthenticated() && (resource.data.uid == request.auth.uid || isAdmin());
       allow create: if isAuthenticated() && request.resource.data.uid == request.auth.uid;
       allow update, delete: if isAuthenticated() && resource.data.uid == request.auth.uid;
     }
@@ -110,38 +164,38 @@ service cloud.firestore {
     // Connections
     match /connections/{connectionId} {
       allow read: if isAuthenticated() && (request.auth.uid == resource.data.personalId || request.auth.uid == resource.data.studentId || isAdmin());
-      allow create: if isAuthenticated() && (request.auth.uid == request.resource.data.personalId || request.auth.uid == request.resource.data.studentId || isAdmin());
-      allow update: if isAuthenticated() && (request.auth.uid == resource.data.personalId || request.auth.uid == resource.data.studentId || isAdmin());
-      allow delete: if isAuthenticated() && (request.auth.uid == resource.data.personalId || request.auth.uid == resource.data.studentId || isAdmin());
+      allow create: if isAuthenticated() && (request.auth.uid == request.resource.data.personalId || isAdmin()) && isValidConnection(request.resource.data);
+      allow update: if isAuthenticated() && (request.auth.uid == resource.data.personalId || request.auth.uid == resource.data.studentId || isAdmin()) && isValidConnection(request.resource.data);
+      allow delete: if isAuthenticated() && (request.auth.uid == resource.data.personalId || isAdmin());
     }
 
     // Invitations
     match /invitations/{invitationId} {
       allow read: if isAuthenticated() && (request.auth.uid == resource.data.personalId || request.auth.uid == resource.data.studentId || request.auth.token.email == resource.data.studentEmail || isAdmin());
-      allow create: if isAuthenticated() && (request.auth.uid == request.resource.data.personalId || isAdmin());
-      allow update: if isAuthenticated() && (request.auth.uid == resource.data.personalId || request.auth.uid == resource.data.studentId || request.auth.token.email == resource.data.studentEmail || isAdmin());
+      allow create: if isAuthenticated() && (request.auth.uid == request.resource.data.personalId || isAdmin()) && isValidInvitation(request.resource.data);
+      allow update: if isAuthenticated() && (request.auth.uid == resource.data.personalId || request.auth.uid == resource.data.studentId || request.auth.token.email == resource.data.studentEmail || isAdmin()) && isValidInvitation(request.resource.data);
       allow delete: if isAuthenticated() && (request.auth.uid == resource.data.personalId || isAdmin());
     }
 
     // Workouts
     match /workouts/{workoutId} {
       allow read: if isAuthenticated() && (request.auth.uid == resource.data.personalId || request.auth.uid == resource.data.studentId || isAdmin());
-      allow create: if isAuthenticated() && (request.auth.uid == request.resource.data.personalId || isAdmin());
-      allow update: if isAuthenticated() && (request.auth.uid == resource.data.personalId || isAdmin());
+      allow create: if isAuthenticated() && (request.auth.uid == request.resource.data.personalId || isAdmin()) && isValidWorkout(request.resource.data);
+      allow update: if isAuthenticated() && (request.auth.uid == resource.data.personalId || isAdmin()) && isValidWorkout(request.resource.data);
       allow delete: if isAuthenticated() && (request.auth.uid == resource.data.personalId || isAdmin());
     }
 
     // Exercises
     match /exercises/{exerciseId} {
       allow read: if isAuthenticated(); 
-      allow create, update, delete: if isAuthenticated(); 
+      allow create, update, delete: if isAdmin(); 
     }
 
     // Assessments
     match /assessments/{assessmentId} {
       allow read: if isAuthenticated() && (request.auth.uid == resource.data.personalId || request.auth.uid == resource.data.studentId || isAdmin());
-      allow create: if isAuthenticated() && (request.auth.uid == request.resource.data.personalId || isAdmin());
-      allow update, delete: if isAuthenticated() && (request.auth.uid == resource.data.personalId || isAdmin());
+      allow create: if isAuthenticated() && (request.auth.uid == request.resource.data.personalId || isAdmin()) && isValidAssessment(request.resource.data);
+      allow update, delete: if isAuthenticated() && (request.auth.uid == resource.data.personalId || isAdmin()) && isValidAssessment(request.resource.data);
     }
 
     // Chats
@@ -152,6 +206,7 @@ service cloud.firestore {
 
       allow read: if isParticipant(resource.data.participants);
       allow create: if isAuthenticated() && request.auth.uid in request.resource.data.participants;
+      allow update: if isParticipant(resource.data.participants);
       
       match /messages/{messageId} {
         allow read: if isParticipant(get(/databases/$(database)/documents/chats/$(chatId)).data.participants);
@@ -162,7 +217,9 @@ service cloud.firestore {
     // System Messages
     match /system_messages/{messageId} {
       allow read: if isAuthenticated();
-      allow write: if isAdmin();
+      allow create: if isAdmin() && isValidSystemMessage(request.resource.data);
+      allow update: if isAdmin() && isValidSystemMessage(request.resource.data);
+      allow delete: if isAdmin();
     }
   }
 }

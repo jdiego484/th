@@ -1626,20 +1626,34 @@ function PersonalDashboard() {
     
     const clientPromises = querySnapshot.docs.map(async (connectionDoc) => {
       const data = connectionDoc.data();
-      const clientDoc = await getDoc(doc(db, "users_public", data.studentId));
-      const privateDoc = await getDoc(doc(db, "users_private", data.studentId));
-      return { 
-        id: clientDoc.id, 
-        ...clientDoc.data(), 
-        ...(privateDoc.exists() ? privateDoc.data() : {}),
-        status: data.status,
-        connectionId: connectionDoc.id,
-        clientType: data.type || null,
-        connectionDate: data.createdAt || ""
-      };
+      try {
+        const clientDoc = await getDoc(doc(db, "users_public", data.studentId));
+        let privateData = {};
+        try {
+          const privateDoc = await getDoc(doc(db, "users_private", data.studentId));
+          if (privateDoc.exists()) {
+            privateData = privateDoc.data();
+          }
+        } catch (e) {
+          console.warn(`Could not fetch private data for student ${data.studentId}:`, e);
+        }
+
+        return { 
+          id: clientDoc.id, 
+          ...clientDoc.data(), 
+          ...privateData,
+          status: data.status,
+          connectionId: connectionDoc.id,
+          clientType: data.type || null,
+          connectionDate: data.createdAt || ""
+        };
+      } catch (e) {
+        console.error(`Error fetching data for student ${data.studentId}:`, e);
+        return null;
+      }
     });
     
-    const clientsData = await Promise.all(clientPromises);
+    const clientsData = (await Promise.all(clientPromises)).filter(c => c !== null);
     setClients(clientsData);
   };
 
@@ -2826,17 +2840,31 @@ function ClientDashboard({ onViewAllWorkouts, onViewSubscriptions }: { onViewAll
     
     const personalPromises = querySnapshot.docs.map(async (connectionDoc) => {
       const data = connectionDoc.data();
-      const personalDoc = await getDoc(doc(db, "users_public", data.personalId));
-      const privateDoc = await getDoc(doc(db, "users_private", data.personalId));
-      return { 
-        id: personalDoc.id, 
-        ...personalDoc.data(), 
-        ...(privateDoc.exists() ? privateDoc.data() : {}),
-        status: data.status 
-      };
+      try {
+        const personalDoc = await getDoc(doc(db, "users_public", data.personalId));
+        let privateData = {};
+        try {
+          const privateDoc = await getDoc(doc(db, "users_private", data.personalId));
+          if (privateDoc.exists()) {
+            privateData = privateDoc.data();
+          }
+        } catch (e) {
+          console.warn(`Could not fetch private data for personal ${data.personalId}:`, e);
+        }
+
+        return { 
+          id: personalDoc.id, 
+          ...personalDoc.data(), 
+          ...privateData,
+          status: data.status 
+        };
+      } catch (e) {
+        console.error(`Error fetching data for personal ${data.personalId}:`, e);
+        return null;
+      }
     });
     
-    const personalsData = await Promise.all(personalPromises);
+    const personalsData = (await Promise.all(personalPromises)).filter(p => p !== null);
     setPersonals(personalsData);
   };
 
@@ -3525,7 +3553,7 @@ function CompleteProfile({ isEditing = false, userOverride = null, onComplete = 
           disabled={isSubmitting}
           className="w-full bg-orange-600 hover:bg-orange-500 disabled:opacity-50 text-white font-bold py-4 rounded-xl transition-all shadow-lg shadow-orange-600/20 mt-6"
         >
-          {isSubmitting ? "Salvando..." : (isEditing ? "Salvar Alterações" : "Concluir Cadastro")}
+          {isSubmitting ? "Salvando..." : (isEditing ? "Confirmar Alterações" : "Concluir Cadastro")}
         </button>
       </form>
     </>
@@ -4462,6 +4490,8 @@ function AdminUserEditView({
 }) {
   const userConnection = connections.find(c => c.client_id === user.id);
 
+  const [activeTab, setActiveTab] = useState<"workouts" | "profile">(user.role === 'student' ? "workouts" : "profile");
+
   const updateType = async (type: "online" | "presencial") => {
     if (!userConnection) return;
     try {
@@ -4614,7 +4644,24 @@ function AdminUserEditView({
 
         {/* Content Section (Workouts or Profile) */}
         <div className="lg:col-span-2 space-y-6">
-          {user.role === 'student' ? (
+          {user.role === 'student' && (
+            <div className="flex bg-neutral-900 p-1 rounded-xl border border-white/5 w-fit">
+              <button 
+                onClick={() => setActiveTab("workouts")}
+                className={`px-6 py-2 rounded-lg text-xs font-bold transition-all ${activeTab === "workouts" ? "bg-orange-600 text-white shadow-lg" : "text-neutral-500 hover:text-white"}`}
+              >
+                Treinos
+              </button>
+              <button 
+                onClick={() => setActiveTab("profile")}
+                className={`px-6 py-2 rounded-lg text-xs font-bold transition-all ${activeTab === "profile" ? "bg-orange-600 text-white shadow-lg" : "text-neutral-500 hover:text-white"}`}
+              >
+                Perfil
+              </button>
+            </div>
+          )}
+
+          {activeTab === 'workouts' && user.role === 'student' ? (
             <div className="bg-neutral-900 rounded-3xl border border-white/10 shadow-2xl overflow-hidden">
               <div className="p-6 border-b border-white/5 flex items-center gap-3">
                 <Dumbbell className="w-5 h-5 text-orange-500" />
@@ -4628,7 +4675,9 @@ function AdminUserEditView({
             <div className="bg-neutral-900 rounded-3xl border border-white/10 shadow-2xl overflow-hidden">
               <div className="p-6 border-b border-white/5 flex items-center gap-3">
                 <User className="w-5 h-5 text-orange-500" />
-                <h3 className="text-lg font-bold text-white">Perfil do Personal</h3>
+                <h3 className="text-lg font-bold text-white">
+                  {user.role === 'personal' ? 'Perfil do Personal' : 'Perfil do Aluno'}
+                </h3>
               </div>
               <div className="p-6">
                 <CompleteProfile isEditing={true} userOverride={user} />
