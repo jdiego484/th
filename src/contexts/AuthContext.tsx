@@ -10,6 +10,7 @@ export type UserType = {
   email: string;
   role: "personal" | "student" | "superadmin";
   photoUrl?: string;
+  phone?: string;
   city?: string;
   cpf?: string;
   medicalHistory?: string;
@@ -53,21 +54,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         let privateData: any = null;
 
         const updateCombinedUser = () => {
-          if (publicData && privateData) {
+          // We need publicData to define the user. privateData is optional but preferred.
+          if (publicData) {
             if (publicData.blocked) {
               console.warn("AuthProvider: Usuário bloqueado.");
               signOut(auth);
               setUser(null);
               alert("Sua conta foi bloqueada. Entre em contato com o administrador.");
-            } else {
-              setUser({
-                ...publicData,
-                ...privateData,
-                id: firebaseUser.uid,
-                role: publicData.role === "client" ? "student" : publicData.role // Map client to student if needed
-              });
-              setAuthError(null);
+              setLoading(false);
+              return;
             }
+
+            const combinedUser: UserType = {
+              ...publicData,
+              ...(privateData || {}),
+              id: firebaseUser.uid,
+              role: publicData.role === "client" ? "student" : publicData.role
+            };
+
+            setUser(combinedUser);
+            setAuthError(null);
             setLoading(false);
           }
         };
@@ -77,12 +83,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             publicData = docSnap.data();
             updateCombinedUser();
           } else {
-            // Fallback for migration or new users
             console.warn("AuthProvider: Perfil público não encontrado.");
+            // If public doesn't exist, we can't really define the user role/name etc.
+            // But we might be in the middle of registration.
             setLoading(false);
           }
         }, (error) => {
+          console.error("Error fetching public profile:", error);
           handleFirestoreError(error, OperationType.GET, `users_public/${firebaseUser.uid}`);
+          setLoading(false);
         });
 
         const unsubPrivate = onSnapshot(privateDocRef, (docSnap) => {
@@ -91,12 +100,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             updateCombinedUser();
           } else {
             console.warn("AuthProvider: Perfil privado não encontrado.");
-            // If private doesn't exist yet, we might still be in registration
             privateData = {}; 
             updateCombinedUser();
           }
         }, (error) => {
-          handleFirestoreError(error, OperationType.GET, `users_private/${firebaseUser.uid}`);
+          console.error("Error fetching private profile:", error);
+          // Don't block the whole app if private profile fails (might be permission issue if not owner)
+          // but here it's the owner fetching their own data, so it should work.
+          privateData = {};
+          updateCombinedUser();
         });
 
         return () => {

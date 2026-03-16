@@ -43,6 +43,18 @@ service cloud.firestore {
     function isOwner(userId) {
       return isAuthenticated() && request.auth.uid == userId;
     }
+
+    function isConnectedTrainer(studentId) {
+      return isAuthenticated() && 
+        exists(/databases/$(database)/documents/connections/$(request.auth.uid + "_" + studentId)) &&
+        get(/databases/$(database)/documents/connections/$(request.auth.uid + "_" + studentId)).data.status == "active";
+    }
+
+    function isConnectedStudent(trainerId) {
+      return isAuthenticated() && 
+        exists(/databases/$(database)/documents/connections/$(trainerId + "_" + request.auth.uid)) &&
+        get(/databases/$(database)/documents/connections/$(trainerId + "_" + request.auth.uid)).data.status == "active";
+    }
     
     function isAdmin() {
       return isAuthenticated() && 
@@ -59,7 +71,8 @@ service cloud.firestore {
 
     function isValidUserPrivate(data) {
       return data.keys().hasAll(['email']) &&
-             data.email is string && data.email.size() > 0 && data.email.size() < 100;
+             data.email is string && data.email.size() > 0 && data.email.size() < 100 &&
+             (!('phone' in data) || (data.phone is string && data.phone.size() >= 2 && data.phone.size() < 20));
     }
 
     // ===============================================================
@@ -81,7 +94,7 @@ service cloud.firestore {
 
     // Private User Data
     match /users_private/{uid} {
-      allow read: if isOwner(uid) || isAdmin();
+      allow read: if isOwner(uid) || isConnectedTrainer(uid) || isAdmin();
       allow create: if isOwner(uid) && isValidUserPrivate(request.resource.data);
       allow update: if (isOwner(uid) && isValidUserPrivate(request.resource.data)) || isAdmin();
       allow delete: if isAdmin();

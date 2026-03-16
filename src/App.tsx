@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, FormEvent, ChangeEvent, ReactNode } from "react";
 import { BrowserRouter, Routes, Route, Navigate, useNavigate } from "react-router-dom";
-import { User, LogOut, Users, Dumbbell, Activity, Search, Plus, ArrowLeft, Clock, Play, Check, Trash2, ChevronLeft, ChevronRight, Calendar as CalendarIcon, AlertTriangle, Image as ImageIcon, Video, Upload, X, Copy, Edit2, MessageSquare, CheckCircle2, XCircle, Circle, GripVertical, Send, CreditCard, FileText, History, RefreshCw, Globe, UserCheck, AlertCircle } from "lucide-react";
+import { User, LogOut, Users, Dumbbell, Activity, Search, Plus, ArrowLeft, Clock, Play, Check, Trash2, ChevronLeft, ChevronRight, Calendar as CalendarIcon, AlertTriangle, Image as ImageIcon, Video, Upload, X, Copy, Edit2, MessageCircle, CheckCircle2, XCircle, Circle, GripVertical, Send, CreditCard, FileText, History, RefreshCw, Globe, UserCheck, AlertCircle, Bell } from "lucide-react";
 import { DragDropContext, Droppable, Draggable, DropResult } from "@hello-pangea/dnd";
 import { auth, db } from "./firebase";
 import { EXERCISES } from "./data/exercises";
@@ -36,10 +36,20 @@ import {
   getDocFromServer
 } from "firebase/firestore";
 
+const openWhatsApp = (phone?: string) => {
+  if (!phone) {
+    alert("Número de WhatsApp não cadastrado para este usuário.");
+    return;
+  }
+  const cleanPhone = phone.replace(/\D/g, "");
+  window.open(`https://wa.me/${cleanPhone}`, "_blank");
+};
+
 function Login() {
   const [isLogin, setIsLogin] = useState(true);
   const [isForgotPassword, setIsForgotPassword] = useState(false);
   const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("55");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [name, setName] = useState("");
@@ -133,13 +143,19 @@ function Login() {
           role: role,
           personalCode: newPersonalCode || (personalCode.trim() ? personalCode.trim().toUpperCase() : ""),
           profileCompleted: false,
+          gender: gender,
+          crefNumber: "",
           createdAt: new Date().toISOString()
         });
 
         // Private data
         batch.set(doc(db, "users_private", uid), {
           email: email.trim().toLowerCase(),
+          phone: phone.trim(),
           cpf: "",
+          birthDate: "",
+          cep: "",
+          address: "",
           medicalHistory: "",
           medications: ""
         });
@@ -151,14 +167,13 @@ function Login() {
 
         await batch.commit();
 
-        if (foundPersonalId) {
-          await addDoc(collection(db, "connections"), {
-            personalId: foundPersonalId,
-            studentId: uid,
-            status: "active",
-            createdAt: new Date().toISOString()
-          });
-        }
+        const connectionId = `${foundPersonalId}_${uid}`;
+        await setDoc(doc(db, "connections", connectionId), {
+          personalId: foundPersonalId,
+          studentId: uid,
+          status: "active",
+          createdAt: new Date().toISOString()
+        });
       }
     } catch (err: any) {
       console.error("Auth error details:", err);
@@ -234,6 +249,20 @@ function Login() {
               required
             />
           </div>
+
+          {!isLogin && !isForgotPassword && (
+            <div>
+              <label className="block text-sm font-medium text-neutral-500 dark:text-neutral-400 mb-1">Telefone (com DDI 55)</label>
+              <input
+                type="tel"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                className="w-full bg-neutral-50 dark:bg-neutral-800 border border-neutral-200 dark:border-white/10 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-orange-600 focus:border-transparent transition-all"
+                placeholder="5511999999999"
+                required
+              />
+            </div>
+          )}
 
           {!isLogin && !isForgotPassword && (
             <div>
@@ -1530,194 +1559,6 @@ function WorkoutHistory({ client, onBack }: { client: any, onBack: () => void })
   );
 }
 
-interface ChatMessage {
-  id: string;
-  text: string;
-  senderId: string;
-  createdAt: any;
-}
-
-function ChatModal({ 
-  roomId, 
-  recipientName, 
-  onClose 
-}: { 
-  roomId: string; 
-  recipientName: string; 
-  onClose: () => void; 
-}) {
-  const { user } = useAuth();
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [newMessage, setNewMessage] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [newMessageReceived, setNewMessageReceived] = useState(false);
-  const isInitialLoad = useRef(true);
-  const scrollRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [messages]);
-
-  useEffect(() => {
-    const q = query(
-      collection(db, "chats", roomId, "messages"),
-      orderBy("createdAt", "asc")
-    );
-
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const msgs = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as ChatMessage[];
-      
-      // Use docChanges to detect NEW messages specifically
-      if (!isInitialLoad.current) {
-        const hasNewIncoming = snapshot.docChanges().some(change => 
-          change.type === "added" && (change.doc.data() as any).senderId !== user?.id
-        );
-
-        if (hasNewIncoming) {
-          // Sound signal
-          const audio = new Audio('https://cdn.pixabay.com/audio/2022/03/10/audio_c35078174a.mp3');
-          audio.volume = 0.5;
-          audio.play().catch(e => console.log("Audio play blocked by browser policy", e));
-          
-          // Visual signal
-          setNewMessageReceived(true);
-          setTimeout(() => setNewMessageReceived(false), 2000);
-        }
-      }
-      
-      setMessages(msgs);
-      setLoading(false);
-      isInitialLoad.current = false;
-    }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, `chats/${roomId}/messages`);
-    });
-
-    return () => unsubscribe();
-  }, [roomId, user?.id]);
-
-  const sendMessage = async (e: FormEvent) => {
-    e.preventDefault();
-    if (!newMessage.trim() || !user) return;
-
-    try {
-      await addDoc(collection(db, "chats", roomId, "messages"), {
-        text: newMessage,
-        senderId: user.id,
-        createdAt: serverTimestamp()
-      });
-      setNewMessage("");
-    } catch (err) {
-      console.error("Erro ao enviar mensagem:", err);
-    }
-  };
-
-  const endChat = async () => {
-    if (!window.confirm("Ao fechar ou encerrar, todo o histórico deste chat será APAGADO permanentemente. Deseja continuar?")) return;
-    
-    try {
-      const q = query(collection(db, "chats", roomId, "messages"));
-      const snapshot = await getDocs(q);
-      const batch = writeBatch(db);
-      
-      snapshot.docs.forEach((doc) => {
-        batch.delete(doc.ref);
-      });
-      
-      await batch.commit();
-      onClose();
-    } catch (err) {
-      console.error("Erro ao encerrar chat:", err);
-      onClose();
-    }
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
-      <div className="bg-neutral-900 w-full max-w-lg h-[600px] max-h-[90vh] rounded-3xl border border-white/10 shadow-2xl flex flex-col overflow-hidden">
-        {/* Header */}
-        <div className={`p-4 border-b border-white/10 flex items-center justify-between bg-neutral-950 transition-all duration-500 ${newMessageReceived ? 'bg-orange-600/30' : ''}`}>
-          <div className="flex items-center gap-3">
-            <div className={`w-10 h-10 bg-orange-600/20 rounded-full flex items-center justify-center text-orange-500 font-bold transition-transform duration-300 ${newMessageReceived ? 'scale-110' : ''}`}>
-              {recipientName.charAt(0).toUpperCase()}
-            </div>
-            <div>
-              <h3 className="text-white font-bold">{recipientName}</h3>
-              <p className="text-[10px] text-emerald-500 flex items-center gap-1">
-                <span className={`w-1.5 h-1.5 bg-emerald-500 rounded-full ${newMessageReceived ? 'animate-ping' : 'animate-pulse'}`}></span>
-                {newMessageReceived ? 'Nova mensagem!' : 'Chat Temporário Ativo'}
-              </p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <button 
-              onClick={endChat}
-              className="flex items-center gap-2 text-xs bg-red-500/10 text-red-500 px-3 py-1.5 rounded-lg border border-red-500/20 hover:bg-red-500 hover:text-white transition-all font-bold"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-              Encerrar e Apagar
-            </button>
-            <button onClick={endChat} className="p-2 text-neutral-400 hover:text-white" title="Fechar e Apagar">
-              <X className="w-5 h-5" />
-            </button>
-          </div>
-        </div>
-
-        {/* Messages */}
-        <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4 bg-neutral-900/50 scroll-smooth">
-          {loading ? (
-            <div className="flex items-center justify-center h-full">
-              <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-orange-500"></div>
-            </div>
-          ) : messages.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full text-neutral-500 text-center space-y-2">
-              <MessageSquare className="w-12 h-12 opacity-20" />
-              <p className="text-sm">Inicie uma conversa segura.<br/>O histórico será apagado ao encerrar.</p>
-            </div>
-          ) : (
-            messages.map((msg) => (
-              <div 
-                key={msg.id} 
-                className={`flex ${msg.senderId === user?.id ? 'justify-end' : 'justify-start'}`}
-              >
-                <div className={`max-w-[80%] p-3 rounded-2xl text-sm ${
-                  msg.senderId === user?.id 
-                    ? 'bg-orange-600 text-white rounded-tr-none' 
-                    : 'bg-neutral-800 text-neutral-200 rounded-tl-none border border-white/5'
-                }`}>
-                  {msg.text}
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-
-        {/* Input */}
-        <form onSubmit={sendMessage} className="p-4 bg-neutral-950 border-t border-white/10 flex gap-2">
-          <input
-            type="text"
-            value={newMessage}
-            onChange={(e) => setNewMessage(e.target.value)}
-            placeholder="Digite sua mensagem..."
-            className="flex-1 bg-neutral-900 border border-white/5 rounded-xl px-4 py-2 text-white focus:outline-none focus:ring-2 focus:ring-orange-500/50"
-          />
-          <button 
-            type="submit"
-            disabled={!newMessage.trim()}
-            className="bg-orange-600 text-white p-2 rounded-xl hover:bg-orange-500 disabled:opacity-50 transition-all"
-          >
-            <Send className="w-5 h-5" />
-          </button>
-        </form>
-      </div>
-    </div>
-  );
-}
-
 function PersonalDashboard() {
   const { user } = useAuth();
   const [clients, setClients] = useState<any[]>([]);
@@ -1725,13 +1566,31 @@ function PersonalDashboard() {
   const [showAdd, setShowAdd] = useState(false);
   const [sortBy, setSortBy] = useState<"name" | "date">("name");
   const [selectedClient, setSelectedClient] = useState<any>(null);
-  const [showClassificationModal, setShowClassificationModal] = useState(false);
-  const [clientTab, setClientTab] = useState<"workouts" | "history" | "assessments" | "statistics">("workouts");
-  const [chatRoom, setChatRoom] = useState<{ id: string; name: string } | null>(null);
   const [inviteEmail, setInviteEmail] = useState("");
   const [addMethod, setAddMethod] = useState<'existing' | 'invite'>('existing');
   const [isInviting, setIsInviting] = useState(false);
   const [inviteStatus, setInviteStatus] = useState<{ type: 'success' | 'error', message: string } | null>(null);
+  const [clientTab, setClientTab] = useState<"workouts" | "history" | "assessments" | "statistics">("workouts");
+  const [showClassificationModal, setShowClassificationModal] = useState(false);
+
+  const generatePersonalCode = async () => {
+    if (!user || user.role !== 'personal' || user.personalCode) return;
+    
+    const newCode = Math.random().toString(36).substring(2, 8).toUpperCase();
+    try {
+      await updateDoc(doc(db, "users_public", user.id), {
+        personalCode: newCode
+      });
+    } catch (err) {
+      console.error("Erro ao gerar código personal:", err);
+    }
+  };
+
+  useEffect(() => {
+    if (user && user.role === 'personal' && !user.personalCode) {
+      generatePersonalCode();
+    }
+  }, [user]);
 
   useEffect(() => {
     if (user) {
@@ -1746,6 +1605,20 @@ function PersonalDashboard() {
     }
   }, [selectedClient]);
 
+  const handleSelectClient = async (client: any) => {
+    try {
+      const privateDoc = await getDoc(doc(db, "users_private", client.id));
+      if (privateDoc.exists()) {
+        setSelectedClient({ ...client, ...privateDoc.data() });
+      } else {
+        setSelectedClient(client);
+      }
+    } catch (err) {
+      console.error("Error fetching private data:", err);
+      setSelectedClient(client);
+    }
+  };
+
   const fetchClients = async () => {
     if (!user) return;
     const q = query(collection(db, "connections"), where("personalId", "==", user.id));
@@ -1754,9 +1627,11 @@ function PersonalDashboard() {
     const clientPromises = querySnapshot.docs.map(async (connectionDoc) => {
       const data = connectionDoc.data();
       const clientDoc = await getDoc(doc(db, "users_public", data.studentId));
+      const privateDoc = await getDoc(doc(db, "users_private", data.studentId));
       return { 
         id: clientDoc.id, 
         ...clientDoc.data(), 
+        ...(privateDoc.exists() ? privateDoc.data() : {}),
         status: data.status,
         connectionId: connectionDoc.id,
         clientType: data.type || null,
@@ -1795,7 +1670,8 @@ function PersonalDashboard() {
       const snapshot = await getDocs(q).catch(err => handleFirestoreError(err, OperationType.LIST, "connections"));
       
       if (snapshot && snapshot.empty) {
-        await addDoc(collection(db, "connections"), {
+        const connectionId = `${user?.id}_${clientId}`;
+        await setDoc(doc(db, "connections", connectionId), {
           personalId: user?.id,
           studentId: clientId,
           status: "active",
@@ -1824,21 +1700,12 @@ function PersonalDashboard() {
   };
   const toggleClientStatus = async (clientId: string, currentStatus: string) => {
     try {
-      const q = query(
-        collection(db, "connections"), 
-        where("personalId", "==", user?.id),
-        where("studentId", "==", clientId)
-      );
-      const snapshot = await getDocs(q);
-      
-      if (!snapshot.empty) {
-        const connectionDoc = snapshot.docs[0];
-        const newStatus = currentStatus === "active" ? "blocked" : "active";
-        await updateDoc(doc(db, "connections", connectionDoc.id), {
-          status: newStatus
-        });
-        fetchClients();
-      }
+      const connectionId = `${user?.id}_${clientId}`;
+      const newStatus = currentStatus === "active" ? "blocked" : "active";
+      await updateDoc(doc(db, "connections", connectionId), {
+        status: newStatus
+      });
+      fetchClients();
     } catch (err) {
       console.error(err);
     }
@@ -1927,11 +1794,11 @@ function PersonalDashboard() {
           </div>
         </div>
         <button
-          onClick={() => setChatRoom({ id: `chat_${user?.id}_${selectedClient.id}`, name: selectedClient.displayName || selectedClient.name })}
-          className="flex items-center gap-2 bg-orange-600 hover:bg-orange-500 text-white px-4 py-2 rounded-xl transition-all shadow-lg shadow-orange-600/20 font-bold text-sm"
+          onClick={() => openWhatsApp(selectedClient.phone)}
+          className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-xl transition-all shadow-lg shadow-emerald-600/20 font-bold text-sm"
         >
-          <MessageSquare className="w-4 h-4" />
-          Chat
+          <MessageCircle className="w-4 h-4" />
+          WhatsApp
         </button>
       </div>
 
@@ -1985,8 +1852,22 @@ function PersonalDashboard() {
       <div className="bg-neutral-900 p-6 rounded-3xl border border-white/10 shadow-2xl text-center mb-8 bg-gradient-to-br from-neutral-900 to-neutral-950">
         <h3 className="text-neutral-400 text-xs font-medium mb-2 uppercase tracking-widest">Seu Código de Convite</h3>
         <div className="flex flex-col items-center gap-3">
-          <div className="text-3xl font-black text-orange-500 font-mono tracking-tighter bg-orange-600/10 px-6 py-4 rounded-2xl border border-orange-500/20 shadow-[0_0_20px_rgba(249,115,22,0.1)]">
-            {user?.personalCode}
+          <div className="flex items-center gap-2">
+            <div className="text-3xl font-black text-orange-500 font-mono tracking-tighter bg-orange-600/10 px-6 py-4 rounded-2xl border border-orange-500/20 shadow-[0_0_20px_rgba(249,115,22,0.1)]">
+              {user?.personalCode || '------'}
+            </div>
+            {user?.personalCode && (
+              <button 
+                onClick={() => {
+                  navigator.clipboard.writeText(user.personalCode);
+                  alert("Código copiado!");
+                }}
+                className="p-3 bg-neutral-800 hover:bg-neutral-700 text-neutral-400 hover:text-white rounded-xl transition-all border border-white/5"
+                title="Copiar Código"
+              >
+                <Copy className="w-5 h-5" />
+              </button>
+            )}
           </div>
           <p className="text-neutral-500 text-[10px] max-w-[180px] leading-relaxed">
             Compartilhe este código com seus alunos para que eles se conectem ao seu perfil.
@@ -2114,7 +1995,7 @@ function PersonalDashboard() {
                     <tr 
                       key={client.id} 
                       className="hover:bg-white/5 transition-colors cursor-pointer"
-                      onClick={() => setSelectedClient(client)}
+                      onClick={() => handleSelectClient(client)}
                     >
                       <td className="px-4 py-3">
                         <div className="flex items-center justify-between gap-3">
@@ -2131,12 +2012,12 @@ function PersonalDashboard() {
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              setChatRoom({ id: `chat_${user?.id}_${client.id}`, name: client.displayName || client.name });
+                              openWhatsApp(client.phone);
                             }}
-                            className="p-2 text-orange-500 hover:bg-orange-500/10 rounded-lg transition-colors sm:hidden"
-                            title="Abrir Chat"
+                            className="p-2 text-emerald-500 hover:bg-emerald-500/10 rounded-lg transition-colors sm:hidden"
+                            title="Abrir WhatsApp"
                           >
-                            <MessageSquare className="w-5 h-5" />
+                            <MessageCircle className="w-5 h-5" />
                           </button>
                         </div>
                       </td>
@@ -2147,12 +2028,12 @@ function PersonalDashboard() {
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              setChatRoom({ id: `chat_${user?.id}_${client.id}`, name: client.displayName || client.name });
+                              openWhatsApp(client.phone);
                             }}
-                            className="p-2 text-orange-500 hover:bg-orange-500/10 rounded-lg transition-colors hidden sm:block"
-                            title="Abrir Chat"
+                            className="p-2 text-emerald-500 hover:bg-emerald-500/10 rounded-lg transition-colors hidden sm:block"
+                            title="Abrir WhatsApp"
                           >
-                            <MessageSquare className="w-5 h-5" />
+                            <MessageCircle className="w-5 h-5" />
                           </button>
                           <button
                             onClick={(e) => {
@@ -2177,14 +2058,6 @@ function PersonalDashboard() {
           </div>
         )}
       </div>
-
-      {chatRoom && (
-        <ChatModal 
-          roomId={chatRoom.id} 
-          recipientName={chatRoom.name} 
-          onClose={() => setChatRoom(null)} 
-        />
-      )}
 
       {showClassificationModal && selectedClient && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
@@ -2302,7 +2175,6 @@ function ClientWorkoutView({ workout, onBack, isPersonal: isPersonalProp }: { wo
   });
 
   const [isFinishing, setIsFinishing] = useState(false);
-  const [chatRoom, setChatRoom] = useState<{ id: string; name: string } | null>(null);
   const [recipientName, setRecipientName] = useState("Carregando...");
   const [isEditing, setIsEditing] = useState(false);
   
@@ -2526,25 +2398,14 @@ function ClientWorkoutView({ workout, onBack, isPersonal: isPersonalProp }: { wo
             </>
           )}
           <button
-            onClick={() => setChatRoom({ 
-              id: isPersonal ? `chat_${user?.id}_${workout.studentId}` : `chat_${workout.personalId}_${user?.id}`, 
-              name: recipientName 
-            })}
-            className="flex items-center gap-2 bg-orange-600/10 hover:bg-orange-600 text-orange-500 hover:text-white px-3 py-2 rounded-xl border border-orange-500/20 transition-all font-bold text-xs"
+            onClick={() => openWhatsApp(workout.personalPhone)}
+            className="flex items-center gap-2 bg-emerald-600/10 hover:bg-emerald-600 text-emerald-500 hover:text-white px-3 py-2 rounded-xl border border-emerald-500/20 transition-all font-bold text-xs"
           >
-            <MessageSquare className="w-4 h-4" />
-            Chat
+            <MessageCircle className="w-4 h-4" />
+            WhatsApp
           </button>
         </div>
       </div>
-
-      {chatRoom && (
-        <ChatModal 
-          roomId={chatRoom.id} 
-          recipientName={chatRoom.name} 
-          onClose={() => setChatRoom(null)} 
-        />
-      )}
 
       {/* Workout Timer / Status Bar */}
       {!isPersonal && !isCompleted && (
@@ -2743,7 +2604,7 @@ function ClientWorkoutView({ workout, onBack, isPersonal: isPersonalProp }: { wo
                   {(isPersonal || isCompleted || !isPersonal) && (
                     <div className="pt-4 border-t border-white/10">
                       <div className="flex items-center gap-2 mb-2 text-sm font-medium text-neutral-400">
-                        <MessageSquare className="w-4 h-4 text-orange-500" />
+                        <MessageCircle className="w-4 h-4 text-emerald-500" />
                         Feedback do Exercício
                       </div>
                       {isPersonal || isCompleted ? (
@@ -2769,7 +2630,7 @@ function ClientWorkoutView({ workout, onBack, isPersonal: isPersonalProp }: { wo
 
       <div className="bg-neutral-900 rounded-2xl border border-white/10 shadow-2xl p-6 mt-8">
         <h3 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
-          <MessageSquare className="w-6 h-6 text-orange-500" />
+          <MessageCircle className="w-6 h-6 text-emerald-500" />
           Feedback Geral do Treino
         </h3>
         {isPersonal || isCompleted ? (
@@ -2871,12 +2732,12 @@ function ClientDashboard({ onViewAllWorkouts, onViewSubscriptions }: { onViewAll
   const [personals, setPersonals] = useState<any[]>([]);
   const [workouts, setWorkouts] = useState<any[]>([]);
   const [selectedWorkout, setSelectedWorkout] = useState<any>(null);
-  const [chatRoom, setChatRoom] = useState<{ id: string; name: string } | null>(null);
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
   const [personalCode, setPersonalCode] = useState("");
   const [isConnecting, setIsConnecting] = useState(false);
   const [connectStatus, setConnectStatus] = useState<{ type: 'success' | 'error', message: string } | null>(null);
   const [showAddPersonal, setShowAddPersonal] = useState(false);
+  const [pendingInvitations, setPendingInvitations] = useState<any[]>([]);
 
   const todayStr = new Date().toISOString().split('T')[0];
   const tomorrow = new Date();
@@ -2891,8 +2752,54 @@ function ClientDashboard({ onViewAllWorkouts, onViewSubscriptions }: { onViewAll
     if (user) {
       fetchPersonals();
       fetchWorkouts();
+      fetchInvitations();
     }
   }, [user]);
+
+  const fetchInvitations = async () => {
+    if (!user?.email) return;
+    const q = query(
+      collection(db, "invitations"),
+      where("studentEmail", "==", user.email.toLowerCase()),
+      where("status", "==", "pending")
+    );
+    const snapshot = await getDocs(q);
+    setPendingInvitations(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+  };
+
+  const acceptInvitation = async (invitation: any) => {
+    if (!user) return;
+    try {
+      const batch = writeBatch(db);
+      
+      // Update invitation status
+      batch.update(doc(db, "invitations", invitation.id), { status: "accepted" });
+      
+      // Create connection
+      const connectionId = `${invitation.personalId}_${user.id}`;
+      batch.set(doc(db, "connections", connectionId), {
+        personalId: invitation.personalId,
+        studentId: user.id,
+        status: "active",
+        createdAt: new Date().toISOString()
+      });
+      
+      await batch.commit();
+      setPendingInvitations(prev => prev.filter(i => i.id !== invitation.id));
+      fetchPersonals();
+    } catch (err) {
+      console.error("Error accepting invitation:", err);
+    }
+  };
+
+  const rejectInvitation = async (invitationId: string) => {
+    try {
+      await updateDoc(doc(db, "invitations", invitationId), { status: "rejected" });
+      setPendingInvitations(prev => prev.filter(i => i.id !== invitationId));
+    } catch (err) {
+      console.error("Error rejecting invitation:", err);
+    }
+  };
 
   const fetchWorkouts = async () => {
     if (!user) return;
@@ -2920,7 +2827,13 @@ function ClientDashboard({ onViewAllWorkouts, onViewSubscriptions }: { onViewAll
     const personalPromises = querySnapshot.docs.map(async (connectionDoc) => {
       const data = connectionDoc.data();
       const personalDoc = await getDoc(doc(db, "users_public", data.personalId));
-      return { id: personalDoc.id, ...personalDoc.data(), status: data.status };
+      const privateDoc = await getDoc(doc(db, "users_private", data.personalId));
+      return { 
+        id: personalDoc.id, 
+        ...personalDoc.data(), 
+        ...(privateDoc.exists() ? privateDoc.data() : {}),
+        status: data.status 
+      };
     });
     
     const personalsData = await Promise.all(personalPromises);
@@ -2967,7 +2880,8 @@ function ClientDashboard({ onViewAllWorkouts, onViewSubscriptions }: { onViewAll
         return;
       }
 
-      await addDoc(collection(db, "connections"), {
+      const connectionId = `${personalId}_${user.id}`;
+      await setDoc(doc(db, "connections", connectionId), {
         personalId: personalId,
         studentId: user.id,
         status: "active",
@@ -3015,6 +2929,39 @@ function ClientDashboard({ onViewAllWorkouts, onViewSubscriptions }: { onViewAll
           </div>
           <div className="absolute -right-4 -bottom-4 w-32 h-32 bg-white/10 rounded-full blur-3xl group-hover:scale-150 transition-transform duration-700"></div>
         </button>
+      )}
+
+      {pendingInvitations.length > 0 && (
+        <div className="space-y-4">
+          <h3 className="text-lg font-bold text-white flex items-center gap-2">
+            <UserCheck className="w-5 h-5 text-orange-500" />
+            Convites Pendentes
+          </h3>
+          <div className="grid gap-4">
+            {pendingInvitations.map(inv => (
+              <div key={inv.id} className="bg-neutral-900 p-6 rounded-2xl border border-orange-500/20 shadow-xl flex items-center justify-between animate-pulse">
+                <div>
+                  <h4 className="font-bold text-white">{inv.personalName}</h4>
+                  <p className="text-sm text-neutral-400">Deseja ser seu personal trainer</p>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => acceptInvitation(inv)}
+                    className="bg-orange-600 hover:bg-orange-500 text-white px-4 py-2 rounded-xl text-sm font-bold transition-all"
+                  >
+                    Aceitar
+                  </button>
+                  <button
+                    onClick={() => rejectInvitation(inv.id)}
+                    className="bg-neutral-800 hover:bg-neutral-700 text-neutral-400 px-4 py-2 rounded-xl text-sm font-bold transition-all"
+                  >
+                    Recusar
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
       )}
 
       <div className="flex items-center justify-between">
@@ -3090,16 +3037,16 @@ function ClientDashboard({ onViewAllWorkouts, onViewSubscriptions }: { onViewAll
               </div>
               <div className="flex items-center gap-2">
                 <button
-                  onClick={() => setChatRoom({ id: `chat_${personal.id}_${user?.id}`, name: personal.displayName || personal.name })}
+                  onClick={() => openWhatsApp(personal.phone)}
                   disabled={personal.status === "blocked"}
                   className={`p-2 rounded-lg transition-colors flex items-center gap-2 ${
                     personal.status === "blocked" 
                       ? "text-neutral-600 cursor-not-allowed" 
-                      : "text-orange-500 hover:bg-orange-500/10"
+                      : "text-emerald-500 hover:bg-emerald-500/10"
                   }`}
                 >
-                  <MessageSquare className="w-5 h-5" />
-                  <span className="text-xs font-bold hidden sm:inline">Chat</span>
+                  <MessageCircle className="w-5 h-5" />
+                  <span className="text-xs font-bold hidden sm:inline">WhatsApp</span>
                 </button>
                 <span className={`px-3 py-1 rounded-full text-xs font-medium border ${
                   personal.status === "blocked"
@@ -3113,14 +3060,6 @@ function ClientDashboard({ onViewAllWorkouts, onViewSubscriptions }: { onViewAll
           ))
         )}
       </div>
-
-      {chatRoom && (
-        <ChatModal 
-          roomId={chatRoom.id} 
-          recipientName={chatRoom.name} 
-          onClose={() => setChatRoom(null)} 
-        />
-      )}
 
       <div className="space-y-8 mt-8">
         {/* Today's Workout */}
@@ -3219,6 +3158,7 @@ function ClientDashboard({ onViewAllWorkouts, onViewSubscriptions }: { onViewAll
 function CompleteProfile({ isEditing = false, userOverride = null, onComplete = null }: { isEditing?: boolean, userOverride?: UserType | null, onComplete?: () => void | null }) {
   const { user: authUser, updateUser } = useAuth();
   const user = userOverride || authUser;
+  const [phone, setPhone] = useState(user?.phone || "55");
   const [cpf, setCpf] = useState(user?.cpf || "");
   const [cep, setCep] = useState(user?.cep || "");
   const [address, setAddress] = useState(user?.address || "");
@@ -3272,16 +3212,17 @@ function CompleteProfile({ isEditing = false, userOverride = null, onComplete = 
         name: displayName || user.name,
         photoUrl,
         city,
+        gender,
         profileCompleted: true,
-        ...(user.role === "personal" ? { cref } : {})
+        ...(user.role === "personal" ? { crefNumber: cref } : {})
       };
 
       const privateData = {
         cpf,
+        phone,
         cep,
         address,
         birthDate,
-        gender,
         ...(user.role === "student" ? { anamnesis } : {}),
         medicalHistory: anamnesis.medicalHistory || "",
         medications: anamnesis.medications || ""
@@ -3362,6 +3303,17 @@ function CompleteProfile({ isEditing = false, userOverride = null, onComplete = 
                 onChange={(e) => setCpf(e.target.value)}
                 className="w-full bg-neutral-800 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-orange-600 transition-all"
                 placeholder="000.000.000-00"
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-neutral-400 mb-1">Telefone (DDI 55)</label>
+              <input
+                type="tel"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                className="w-full bg-neutral-800 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-orange-600 transition-all"
+                placeholder="5511999999999"
                 required
               />
             </div>
@@ -4612,13 +4564,21 @@ function AdminUserEditView({
                   {user.blocked ? 'Desbloquear' : 'Bloquear'}
                 </button>
                 <button 
-                  onClick={() => onSendMessage(user.id)}
-                  className="flex items-center justify-center gap-2 py-3 bg-orange-500/10 text-orange-500 border border-orange-500/20 rounded-xl font-bold text-xs hover:bg-orange-500/20 transition-all"
+                  onClick={() => openWhatsApp(user.phone)}
+                  className="flex items-center justify-center gap-2 py-3 bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 rounded-xl font-bold text-xs hover:bg-emerald-500/20 transition-all"
                 >
-                  <MessageSquare className="w-4 h-4" />
-                  Mensagem
+                  <MessageCircle className="w-4 h-4" />
+                  WhatsApp
                 </button>
               </div>
+
+              <button 
+                onClick={() => onSendMessage(user.id)}
+                className="w-full flex items-center justify-center gap-2 py-3 bg-orange-500/10 text-orange-500 border border-orange-500/20 rounded-xl font-bold text-xs hover:bg-orange-500/20 transition-all"
+              >
+                <Bell className="w-4 h-4" />
+                Notificar Usuário
+              </button>
 
               <button 
                 onClick={() => onImpersonate(user)}
@@ -4759,55 +4719,37 @@ function SystemBanner() {
 function Dashboard() {
   const { user, loading, logout } = useAuth();
   const [activeTab, setActiveTab] = useState("home");
-  const [hasUnreadMessages, setHasUnreadMessages] = useState(false);
 
   useEffect(() => {
     if (!user || user.role === 'superadmin') return;
-    
-    const roomUnsubscribes = new Map<string, () => void>();
-    
-    const roleField = user.role === 'personal' ? 'personalId' : 'studentId';
-    const connectionsQ = query(collection(db, "connections"), where(roleField, "==", user.id));
-    
-    const roomUnreadCounts = new Map<string, number>();
-    
-    const unsubConnections = onSnapshot(connectionsQ, (snapshot) => {
-      const currentConnections = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as any[];
+  }, [user]);
+
+  // Migration logic for legacy connections
+  useEffect(() => {
+    if (!user || user.role !== 'student' || !user.personalId) return;
+
+    const migrateLegacyConnection = async () => {
+      const connectionId = `${user.personalId}_${user.id}`;
+      const connRef = doc(db, "connections", connectionId);
       
-      // Clear old unsubscribes
-      roomUnsubscribes.forEach(unsub => unsub());
-      roomUnsubscribes.clear();
-      roomUnreadCounts.clear();
-      
-      currentConnections.forEach((conn: any) => {
-        const roomId = user.role === 'personal' 
-          ? `${user.id}_${conn.studentId}`
-          : `${conn.personalId}_${user.id}`;
-          
-        const messagesQ = query(
-          collection(db, "chats", roomId, "messages"),
-          where("read", "==", false),
-          where("senderId", "!=", user.id)
-        );
-        
-        const unsubRoom = onSnapshot(messagesQ, (msgSnapshot) => {
-          roomUnreadCounts.set(roomId, msgSnapshot.size);
-          const totalUnread = Array.from(roomUnreadCounts.values()).reduce((a, b) => a + b, 0);
-          setHasUnreadMessages(totalUnread > 0);
-        }, (err) => {
-          console.error(`Erro ao ouvir mensagens da sala ${roomId}:`, err);
-        });
-        
-        roomUnsubscribes.set(roomId, unsubRoom);
-      });
-    }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, "connections");
-    });
-    
-    return () => {
-      unsubConnections();
-      roomUnsubscribes.forEach(unsub => unsub());
+      try {
+        const connSnap = await getDoc(connRef);
+        if (!connSnap.exists()) {
+          console.log("Migrating legacy connection for user:", user.id);
+          await setDoc(connRef, {
+            personalId: user.personalId,
+            studentId: user.id,
+            status: "active",
+            createdAt: new Date().toISOString(),
+            migrated: true
+          });
+        }
+      } catch (error) {
+        console.error("Error migrating legacy connection:", error);
+      }
     };
+
+    migrateLegacyConnection();
   }, [user]);
 
   // Se estiver carregando OU se estiver logado no Firebase mas o perfil ainda não chegou do Firestore
@@ -4879,19 +4821,6 @@ function Dashboard() {
             </div>
 
             <div className="flex items-center gap-4">
-              <button 
-                onClick={() => {
-                  setActiveTab("home");
-                  setHasUnreadMessages(false);
-                }}
-                className={`relative p-2 rounded-full transition-colors ${hasUnreadMessages ? "text-orange-500 bg-orange-500/10 animate-pulse" : "text-neutral-400 hover:bg-white/5"}`}
-                title="Mensagens"
-              >
-                <MessageSquare className="w-5 h-5" />
-                {hasUnreadMessages && (
-                  <span className="absolute top-0 right-0 w-2 h-2 bg-red-500 rounded-full border border-neutral-900"></span>
-                )}
-              </button>
               <button 
                 onClick={() => setActiveTab("profile")}
                 className="flex items-center gap-3 hover:bg-white/5 p-1 pr-3 rounded-full transition-colors"
@@ -5066,13 +4995,11 @@ function Dashboard() {
           <button 
             onClick={() => {
               setActiveTab("home");
-              setHasUnreadMessages(false);
             }}
             className={`flex flex-col items-center justify-center w-full h-full space-y-1 ${activeTab === "home" ? "text-orange-500" : "text-neutral-500"}`}
           >
             <div className="relative">
               <Users className="w-5 h-5" />
-              {hasUnreadMessages && <span className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full border border-neutral-900"></span>}
             </div>
             <span className="text-[10px] font-medium">Rede</span>
           </button>
