@@ -36,14 +36,25 @@ import {
 } from "firebase/firestore";
 
 const openWhatsApp = (phone?: string) => {
+  console.log("Telefone recebido:", phone);
+
   if (!phone) {
     alert("Número de WhatsApp não cadastrado para este usuário.");
     return;
   }
-  const cleanPhone = phone.replace(/\D/g, "");
-  window.open(`https://wa.me/${cleanPhone}`, "_blank");
-};
 
+  let cleanPhone = phone.replace(/\D/g, "");
+
+  // garante código do Brasil
+  if (!cleanPhone.startsWith("55")) {
+    cleanPhone = "55" + cleanPhone;
+  }
+
+  const url = `https://wa.me/${cleanPhone}`;
+  console.log("URL gerada:", url);
+
+  window.open(url, "_blank", "noopener,noreferrer");
+};
 function Login() {
   const [isLogin, setIsLogin] = useState(true);
   const [isForgotPassword, setIsForgotPassword] = useState(false);
