@@ -1819,13 +1819,16 @@ function PersonalDashboard() {
             <p className="text-[10px] text-neutral-500 uppercase tracking-wider">Perfil do Aluno</p>
           </div>
         </div>
-        <button
-          onClick={() => openWhatsApp(selectedClient.phone)}
-          className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-xl transition-all shadow-lg shadow-emerald-600/20 font-bold text-sm"
-        >
-          <MessageCircle className="w-4 h-4" />
-          WhatsApp
-        </button>
+        <button 
+  onClick={() => {
+    console.log("USER COMPLETO:", user);
+    openWhatsApp(user.phone);
+  }}
+  className="flex items-center justify-center gap-2 py-3 bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 rounded-xl font-bold text-xs hover:bg-emerald-500/20 transition-all"
+>
+  <MessageCircle className="w-4 h-4" />
+  WhatsApp
+</button>
       </div>
 
       <div className="flex bg-neutral-900 p-1 rounded-xl border border-white/10 shadow-2xl w-full max-w-lg mx-auto mb-6">
