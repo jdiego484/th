@@ -167,13 +167,15 @@ function Login() {
 
         await batch.commit();
 
-        const connectionId = `${foundPersonalId}_${uid}`;
-        await setDoc(doc(db, "connections", connectionId), {
-          personalId: foundPersonalId,
-          studentId: uid,
-          status: "active",
-          createdAt: new Date().toISOString()
-        });
+        if (foundPersonalId) {
+          const connectionId = `${foundPersonalId}_${uid}`;
+          await setDoc(doc(db, "connections", connectionId), {
+            personalId: foundPersonalId,
+            studentId: uid,
+            status: "active",
+            createdAt: new Date().toISOString()
+          });
+        }
       }
     } catch (err: any) {
       console.error("Auth error details:", err);
@@ -3994,6 +3996,32 @@ function SuperAdminDashboard() {
     }
   };
 
+  const deleteUserAccount = async (userId: string) => {
+    try {
+      const userToDelete = users.find(u => u.id === userId);
+      if (!userToDelete) return;
+
+      const batch = writeBatch(db);
+      batch.delete(doc(db, "users_public", userId));
+      batch.delete(doc(db, "users_private", userId));
+      if (userToDelete.email) {
+        batch.delete(doc(db, "user_emails", userToDelete.email.toLowerCase()));
+      }
+      
+      // Also delete connections
+      const userConnections = connections.filter(c => c.personalId === userId || c.studentId === userId);
+      userConnections.forEach(c => {
+        batch.delete(doc(db, "connections", c.id));
+      });
+
+      await batch.commit();
+      setUsers(prev => prev.filter(u => u.id !== userId));
+    } catch (error) {
+      console.error("Error deleting user account:", error);
+      throw error;
+    }
+  };
+
   const filteredUsers = users.filter(u => {
     const matchesSearch = u.name?.toLowerCase().includes(searchTerm.toLowerCase()) || 
                          u.email?.toLowerCase().includes(searchTerm.toLowerCase());
@@ -4220,6 +4248,7 @@ function SuperAdminDashboard() {
                 if (text) sendSystemMessage(id, text);
               }}
               onImpersonate={setImpersonatedUser}
+              onDeleteUser={deleteUserAccount}
               connections={connections}
             />
           ) : (
@@ -4478,6 +4507,7 @@ function AdminUserEditView({
   onToggleBlock, 
   onSendMessage, 
   onImpersonate,
+  onDeleteUser,
   connections
 }: { 
   user: UserType, 
@@ -4486,11 +4516,46 @@ function AdminUserEditView({
   onToggleBlock: (id: string, current: boolean) => void,
   onSendMessage: (id: string) => void,
   onImpersonate: (user: UserType) => void,
+  onDeleteUser: (id: string) => void,
   connections: any[]
 }) {
   const userConnection = connections.find(c => c.client_id === user.id);
 
   const [activeTab, setActiveTab] = useState<"workouts" | "profile">(user.role === 'student' ? "workouts" : "profile");
+  const [localRole, setLocalRole] = useState(user.role);
+  const [localBlocked, setLocalBlocked] = useState(!!user.blocked);
+  const [isSaving, setIsSaving] = useState(false);
+
+  const handleConfirmChanges = async () => {
+    setIsSaving(true);
+    try {
+      if (localRole !== user.role) {
+        await onUpdateRole(user.id, localRole as any);
+      }
+      if (localBlocked !== !!user.blocked) {
+        await onToggleBlock(user.id, !localBlocked);
+      }
+      alert("Alterações de status e cargo salvas com sucesso!");
+    } catch (error) {
+      console.error("Error saving admin changes:", error);
+      alert("Erro ao salvar alterações.");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleDeleteClick = async () => {
+    if (window.confirm(`TEM CERTEZA que deseja excluir permanentemente a conta de ${user.name}? Esta ação não pode ser desfeita e removerá todos os dados do usuário.`)) {
+      try {
+        await onDeleteUser(user.id);
+        alert("Usuário excluído com sucesso.");
+        onClose();
+      } catch (error) {
+        console.error("Error deleting user:", error);
+        alert("Erro ao excluir usuário.");
+      }
+    }
+  };
 
   const updateType = async (type: "online" | "presencial") => {
     if (!userConnection) return;
@@ -4544,12 +4609,13 @@ function AdminUserEditView({
               <div className="flex flex-col gap-2">
                 <label className="text-[10px] font-bold text-neutral-500 uppercase tracking-widest">Alterar Role</label>
                 <select 
-                  value={user.role}
-                  onChange={(e) => onUpdateRole(user.id, e.target.value as any)}
+                  value={localRole}
+                  onChange={(e) => setLocalRole(e.target.value as any)}
                   className="w-full bg-neutral-800 border border-white/5 text-white text-sm rounded-xl px-4 py-3 focus:ring-orange-500 outline-none transition-all"
                 >
                   <option value="student">Aluno</option>
                   <option value="personal">Personal</option>
+                  <option value="superadmin">Superadmin</option>
                 </select>
               </div>
 
@@ -4583,15 +4649,15 @@ function AdminUserEditView({
 
               <div className="grid grid-cols-2 gap-2">
                 <button 
-                  onClick={() => onToggleBlock(user.id, !!user.blocked)}
+                  onClick={() => setLocalBlocked(!localBlocked)}
                   className={`flex items-center justify-center gap-2 py-3 rounded-xl font-bold text-xs transition-all ${
-                    user.blocked 
+                    localBlocked 
                     ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 hover:bg-emerald-500/20' 
                     : 'bg-red-500/10 text-red-500 border border-red-500/20 hover:bg-red-500/20'
                   }`}
                 >
-                  {user.blocked ? <CheckCircle2 className="w-4 h-4" /> : <XCircle className="w-4 h-4" />}
-                  {user.blocked ? 'Desbloquear' : 'Bloquear'}
+                  {localBlocked ? <CheckCircle2 className="w-4 h-4" /> : <XCircle className="w-4 h-4" />}
+                  {localBlocked ? 'Desbloquear' : 'Bloquear'}
                 </button>
                 <button 
                   onClick={() => openWhatsApp(user.phone)}
@@ -4601,6 +4667,15 @@ function AdminUserEditView({
                   WhatsApp
                 </button>
               </div>
+
+              <button 
+                onClick={handleConfirmChanges}
+                disabled={isSaving || (localRole === user.role && localBlocked === !!user.blocked)}
+                className="w-full flex items-center justify-center gap-2 py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold text-xs transition-all disabled:opacity-50 disabled:bg-neutral-800 disabled:text-neutral-500"
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                {isSaving ? "Salvando..." : "Confirmar Alterações de Status"}
+              </button>
 
               <button 
                 onClick={() => onSendMessage(user.id)}
@@ -4616,6 +4691,14 @@ function AdminUserEditView({
               >
                 <User className="w-4 h-4" />
                 Ver como Usuário
+              </button>
+
+              <button 
+                onClick={handleDeleteClick}
+                className="w-full flex items-center justify-center gap-2 py-3 bg-red-500/10 text-red-500 border border-red-500/20 rounded-xl font-bold text-xs hover:bg-red-500 hover:text-white transition-all"
+              >
+                <Trash2 className="w-4 h-4" />
+                Excluir Conta do Usuário
               </button>
             </div>
           </div>
@@ -4768,6 +4851,72 @@ function SystemBanner() {
 function Dashboard() {
   const { user, loading, logout } = useAuth();
   const [activeTab, setActiveTab] = useState("home");
+  const [showDeleteAccountModal, setShowDeleteAccountModal] = useState(false);
+  const [isDeletingAccount, setIsDeletingAccount] = useState(false);
+
+  const handleDeleteAccount = async () => {
+    const userAuth = auth.currentUser;
+    if (!userAuth) {
+      console.error("No user authenticated");
+      return;
+    }
+
+    setIsDeletingAccount(true);
+    try {
+      const uid = userAuth.uid;
+      const email = userAuth.email?.toLowerCase();
+
+      console.log("Starting account deletion for UID:", uid);
+
+      // 3. DELETE CONNECTIONS FIRST
+      // Query connections where personalId == uid
+      const qPersonal = query(collection(db, "connections"), where("personalId", "==", uid));
+      const personalSnap = await getDocs(qPersonal);
+      for (const d of personalSnap.docs) {
+        await deleteDoc(d.ref);
+        console.log("Deleted connection (personal):", d.id);
+      }
+
+      // Query connections where studentId == uid
+      const qStudent = query(collection(db, "connections"), where("studentId", "==", uid));
+      const studentSnap = await getDocs(qStudent);
+      for (const d of studentSnap.docs) {
+        await deleteDoc(d.ref);
+        console.log("Deleted connection (student):", d.id);
+      }
+
+      // 4. DELETE USER DATA
+      // users_public/{uid}
+      await deleteDoc(doc(db, "users_public", uid));
+      console.log("Deleted users_public document");
+
+      // users_private/{uid}
+      await deleteDoc(doc(db, "users_private", uid));
+      console.log("Deleted users_private document");
+
+      // user_emails/{email}
+      if (email) {
+        await deleteDoc(doc(db, "user_emails", email));
+        console.log("Deleted user_emails document");
+      }
+
+      // 5. ONLY AFTER ALL DELETES
+      await deleteUser(userAuth);
+      console.log("User deleted from Firebase Authentication");
+
+      setShowDeleteAccountModal(false);
+      window.location.href = "/login";
+    } catch (err: any) {
+      console.error("Delete account error:", err);
+      if (err.code === "auth/requires-recent-login") {
+        alert("Para sua segurança, você precisa ter feito login recentemente para excluir sua conta. Por favor, saia e entre novamente antes de tentar excluir.");
+      } else {
+        alert("Ocorreu um erro ao excluir sua conta. Por favor, tente novamente mais tarde.");
+      }
+    } finally {
+      setIsDeletingAccount(false);
+    }
+  };
 
   useEffect(() => {
     if (!user || user.role === 'superadmin') return;
@@ -4999,34 +5148,7 @@ function Dashboard() {
                     Ao excluir sua conta, todos os seus dados, treinos e conexões serão removidos permanentemente. Esta ação não pode ser desfeita.
                   </p>
                   <button
-                    onClick={async () => {
-                      if (window.confirm("Tem certeza que deseja excluir sua conta permanentemente? Esta ação não pode ser desfeita.")) {
-                        try {
-                          const userAuth = auth.currentUser;
-                          if (userAuth) {
-                            // Delete from Firestore first
-                            const batch = writeBatch(db);
-                            batch.delete(doc(db, "users_public", userAuth.uid));
-                            batch.delete(doc(db, "users_private", userAuth.uid));
-                            if (userAuth.email) {
-                              batch.delete(doc(db, "user_emails", userAuth.email.toLowerCase()));
-                            }
-                            await batch.commit();
-                            // Delete from Auth
-                            await deleteUser(userAuth);
-                            alert("Sua conta foi excluída com sucesso.");
-                            window.location.href = "/login";
-                          }
-                        } catch (err: any) {
-                          console.error("Delete account error:", err);
-                          if (err.code === "auth/requires-recent-login") {
-                            alert("Para sua segurança, você precisa ter feito login recentemente para excluir sua conta. Por favor, saia e entre novamente antes de tentar excluir.");
-                          } else {
-                            alert("Ocorreu um erro ao excluir sua conta. Tente novamente mais tarde.");
-                          }
-                        }
-                      }
-                    }}
+                    onClick={() => setShowDeleteAccountModal(true)}
                     className="w-full bg-red-600/10 hover:bg-red-600 text-red-500 hover:text-white border border-red-500/50 font-bold py-3 rounded-xl transition-all"
                   >
                     Excluir Minha Conta
@@ -5086,6 +5208,46 @@ function Dashboard() {
           </button>
         </div>
       </div>
+
+      {/* Delete Account Confirmation Modal */}
+      {showDeleteAccountModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+          <div className="bg-neutral-900 border border-white/10 rounded-3xl w-full max-w-md overflow-hidden shadow-2xl animate-in fade-in zoom-in duration-200">
+            <div className="p-8 text-center">
+              <div className="w-16 h-16 bg-red-500/10 rounded-full flex items-center justify-center mx-auto mb-6">
+                <AlertTriangle className="w-8 h-8 text-red-500" />
+              </div>
+              <h3 className="text-2xl font-bold text-white mb-4">Confirmar Exclusão</h3>
+              <p className="text-neutral-400 mb-8 leading-relaxed">
+                Tem certeza que deseja excluir sua conta permanentemente? Esta ação não pode ser desfeita e todos os seus dados serão removidos.
+              </p>
+              <div className="space-y-3">
+                <button
+                  onClick={handleDeleteAccount}
+                  disabled={isDeletingAccount}
+                  className="w-full py-4 bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white rounded-2xl font-bold transition-all flex items-center justify-center gap-2 shadow-lg shadow-red-600/20"
+                >
+                  {isDeletingAccount ? (
+                    <>
+                      <div className="w-5 h-5 border-2 border-white/20 border-t-white rounded-full animate-spin"></div>
+                      Excluindo...
+                    </>
+                  ) : (
+                    "Sim, Excluir Permanentemente"
+                  )}
+                </button>
+                <button
+                  onClick={() => setShowDeleteAccountModal(false)}
+                  disabled={isDeletingAccount}
+                  className="w-full py-4 bg-neutral-800 hover:bg-neutral-700 disabled:opacity-50 text-white rounded-2xl font-bold transition-all"
+                >
+                  Cancelar
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
