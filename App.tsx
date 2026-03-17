@@ -1819,6 +1819,24 @@ function PersonalDashboard() {
             <p className="text-[10px] text-neutral-500 uppercase tracking-wider">Perfil do Aluno</p>
           </div>
         </div>
+          <button
+  onClick={() => {
+    console.log("TESTE USER:", user);
+    alert(JSON.stringify(user, null, 2));
+  }}
+  style={{
+    position: "fixed",
+    bottom: "20px",
+    right: "20px",
+    zIndex: 9999,
+    padding: "10px",
+    background: "red",
+    color: "white",
+    borderRadius: "8px"
+  }}
+>
+  TESTAR USER
+</button>
         <button 
   onClick={() => {
     console.log("USER COMPLETO:", user);
