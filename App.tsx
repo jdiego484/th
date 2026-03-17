@@ -4670,12 +4670,15 @@ function AdminUserEditView({
                   {localBlocked ? 'Desbloquear' : 'Bloquear'}
                 </button>
                 <button 
-                  onClick={() => openWhatsApp(user.phone)}
-                  className="flex items-center justify-center gap-2 py-3 bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 rounded-xl font-bold text-xs hover:bg-emerald-500/20 transition-all"
-                >
-                  <MessageCircle className="w-4 h-4" />
-                  WhatsApp
-                </button>
+  onClick={() => {
+    console.log("USER COMPLETO:", user);
+    openWhatsApp(user.phone);
+  }}
+  className="flex items-center justify-center gap-2 py-3 bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 rounded-xl font-bold text-xs hover:bg-emerald-500/20 transition-all"
+>
+  <MessageCircle className="w-4 h-4" />
+  WhatsApp
+</button>
               </div>
 
               <button 
