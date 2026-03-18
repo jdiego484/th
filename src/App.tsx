@@ -1640,7 +1640,13 @@ function PersonalDashboard() {
       const data = connectionDoc.data();
       try {
         const clientDoc = await getDoc(doc(db, "users_public", data.studentId));
-        const publicData = clientDoc.exists() ? clientDoc.data() : {};
+        if (!clientDoc.exists()) {
+          console.warn(`Student document ${data.studentId} does not exist for connection ${connectionDoc.id}. Cleaning up...`);
+          // Optionally delete the orphan connection
+          // await deleteDoc(connectionDoc.ref);
+          return null;
+        }
+        const publicData = clientDoc.data();
         let privateData = {};
         try {
           const privateDoc = await getDoc(doc(db, "users_private", data.studentId));
@@ -1735,6 +1741,20 @@ function PersonalDashboard() {
       fetchClients();
     } catch (err) {
       console.error(err);
+    }
+  };
+
+  const removeClient = async (clientId: string) => {
+    if (!window.confirm("Deseja realmente remover este aluno da sua lista? Esta ação não excluirá a conta do aluno, apenas o vínculo com você.")) return;
+    
+    try {
+      const connectionId = `${user?.id}_${clientId}`;
+      await deleteDoc(doc(db, "connections", connectionId));
+      fetchClients();
+      alert("Aluno removido com sucesso!");
+    } catch (err) {
+      console.error("Erro ao remover aluno:", err);
+      alert("Erro ao remover aluno. Tente novamente.");
     }
   };
 
@@ -2074,6 +2094,16 @@ function PersonalDashboard() {
                             }`}
                           >
                             {client.status === "blocked" ? "Desbloquear" : "Bloquear"}
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              removeClient(client.id);
+                            }}
+                            className="p-2 text-red-500 hover:bg-red-500/10 rounded-lg transition-colors"
+                            title="Remover Aluno"
+                          >
+                            <Trash2 className="w-5 h-5" />
                           </button>
                         </div>
                       </td>
@@ -4040,14 +4070,27 @@ function SuperAdminDashboard() {
         batch.delete(doc(db, "user_emails", userToDelete.email.toLowerCase()));
       }
       
-      // Also delete connections
-      const userConnections = connections.filter(c => c.personalId === userId || c.studentId === userId);
-      userConnections.forEach(c => {
-        batch.delete(doc(db, "connections", c.id));
+      // Also delete connections, workouts, assessments, and invitations
+      const [connSnap, connSnap2, workSnap, workSnap2, asseSnap, asseSnap2, invSnap, invSnap2, invSnap3] = await Promise.all([
+        getDocs(query(collection(db, "connections"), where("studentId", "==", userId))),
+        getDocs(query(collection(db, "connections"), where("personalId", "==", userId))),
+        getDocs(query(collection(db, "workouts"), where("studentId", "==", userId))),
+        getDocs(query(collection(db, "workouts"), where("personalId", "==", userId))),
+        getDocs(query(collection(db, "assessments"), where("studentId", "==", userId))),
+        getDocs(query(collection(db, "assessments"), where("personalId", "==", userId))),
+        getDocs(query(collection(db, "invitations"), where("studentId", "==", userId))),
+        getDocs(query(collection(db, "invitations"), where("personalId", "==", userId))),
+        getDocs(query(collection(db, "invitations"), where("studentEmail", "==", userToDelete.email?.toLowerCase() || "")))
+      ]);
+
+      const allSnaps = [connSnap, connSnap2, workSnap, workSnap2, asseSnap, asseSnap2, invSnap, invSnap2, invSnap3];
+      allSnaps.forEach(snap => {
+        snap.docs.forEach(d => batch.delete(d.ref));
       });
 
       await batch.commit();
       setUsers(prev => prev.filter(u => u.id !== userId));
+      refreshData();
     } catch (error) {
       console.error("Error deleting user account:", error);
       throw error;
