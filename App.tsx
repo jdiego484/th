@@ -1897,7 +1897,7 @@ onClick={() => openWhatsApp("5534988785455")}
   return (
     <div className="space-y-6">
       <div className="bg-neutral-900 p-6 rounded-3xl border border-white/10 shadow-2xl text-center mb-8 bg-gradient-to-br from-neutral-900 to-neutral-950">
-        <h3 className="text-neutral-400 text-xs font-medium mb-2 uppercase tracking-widest">SEU CÓDIGO DE CONVITE</h3> <h1>TESTE WHATSAPP 123</h1>
+        <h3 className="text-neutral-400 text-xs font-medium mb-2 uppercase tracking-widest">Seu Código de Convite</h3> 
         <div className="flex flex-col items-center gap-3">
           <div className="flex items-center gap-2">
             <div className="text-3xl font-black text-orange-500 font-mono tracking-tighter bg-orange-600/10 px-6 py-4 rounded-2xl border border-orange-500/20 shadow-[0_0_20px_rgba(249,115,22,0.1)]">
