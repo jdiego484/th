@@ -775,7 +775,7 @@ function WorkoutBuilder({ client, onBack, existingWorkout, personalOverrideId }:
           </h2>
           <p className="text-sm text-neutral-400">Aluno: <span className="text-orange-500 font-medium">{client.name}</span></p>
         </div>
-        <div className="ml-auto">
+        <div className="ml-auto"> <h1>TESTE WHATSAPP 123</h1>
           <button 
             onClick={() => setShowCopyModal(true)}
             className="flex items-center gap-2 bg-neutral-800 hover:bg-neutral-700 text-white px-4 py-2 rounded-xl border border-white/10 transition-colors text-sm font-medium"
