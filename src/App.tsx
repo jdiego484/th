@@ -1827,10 +1827,15 @@ function PersonalDashboard() {
             <p className="text-[10px] text-neutral-500 uppercase tracking-wider">Perfil do Aluno</p>
           </div>
         </div>
-        <button onClick={() => openWhatsApp("5534988785455")}>
-  TESTE WHATSAPP
-</button>
-      </div>
+       <button 
+  onClick={() => {
+    console.log("USER COMPLETO:", user);
+    console.log("PHONE:", user?.phone);
+    openWhatsApp(user?.phone);
+  }}
+>
+  TESTE USER PHONE
+</button>      </div>
 
       <div className="flex bg-neutral-900 p-1 rounded-xl border border-white/10 shadow-2xl w-full max-w-lg mx-auto mb-6">
         <button
