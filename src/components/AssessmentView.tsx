@@ -331,7 +331,15 @@ export function AssessmentView({ clientId, clientName, onBack, isPersonal }: { c
                             {a.photos.map((url: string, idx: number) => (
                               <button 
                                 key={idx}
-                                onClick={() => window.open(url, '_blank')}
+                                onClick={() => {
+                                  const link = document.createElement('a');
+                                  link.href = url;
+                                  link.target = '_blank';
+                                  link.rel = 'noopener noreferrer';
+                                  document.body.appendChild(link);
+                                  link.click();
+                                  document.body.removeChild(link);
+                                }}
                                 className="w-8 h-8 rounded-lg overflow-hidden border border-white/10 hover:border-orange-500 transition-all"
                               >
                                 <img src={url} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />

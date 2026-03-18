@@ -37,32 +37,23 @@ import {
 } from "firebase/firestore";
 
 const openWhatsApp = (phone?: string) => {
-  console.log("Telefone recebido:", phone);
-
   if (!phone) {
-    alert("TESTE: telefone não encontrado");
+    alert("Número de WhatsApp não cadastrado para este usuário.");
     return;
   }
-
-  let cleanPhone = phone.replace(/\D/g, "");
-
-  // garante código do Brasil
-  if (!cleanPhone.startsWith("55")) {
-    cleanPhone = "55" + cleanPhone;
-  }
-
+  const cleanPhone = phone.replace(/\D/g, "");
   const url = `https://wa.me/${cleanPhone}`;
-  console.log("URL gerada:", url);
-
-  // forma mais confiável (evita bloqueio)
-  const a = document.createElement("a");
-  a.href = url;
-  a.target = "_blank";
-  a.rel = "noopener noreferrer";
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
+  
+  // Create a temporary link and click it for better iframe compatibility
+  const link = document.createElement("a");
+  link.href = url;
+  link.target = "_blank";
+  link.rel = "noopener noreferrer";
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
 };
+
 function Login() {
   const [isLogin, setIsLogin] = useState(true);
   const [isForgotPassword, setIsForgotPassword] = useState(false);
@@ -1827,15 +1818,14 @@ function PersonalDashboard() {
             <p className="text-[10px] text-neutral-500 uppercase tracking-wider">Perfil do Aluno</p>
           </div>
         </div>
-       <button 
-  onClick={() => {
-    console.log("USER COMPLETO:", user);
-    console.log("PHONE:", user?.phone);
-    openWhatsApp(user?.phone);
-  }}
->
-  TESTE USER PHONE
-</button>      </div>
+        <button
+          onClick={() => openWhatsApp(selectedClient.phone)}
+          className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-xl transition-all shadow-lg shadow-emerald-600/20 font-bold text-sm"
+        >
+          <MessageCircle className="w-4 h-4" />
+          WhatsApp
+        </button>
+      </div>
 
       <div className="flex bg-neutral-900 p-1 rounded-xl border border-white/10 shadow-2xl w-full max-w-lg mx-auto mb-6">
         <button
@@ -4874,63 +4864,85 @@ function Dashboard() {
   const [isDeletingAccount, setIsDeletingAccount] = useState(false);
 
   const handleDeleteAccount = async () => {
-    const userAuth = auth.currentUser;
-    if (!userAuth) {
-      console.error("No user authenticated");
-      return;
-    }
-
     setIsDeletingAccount(true);
     try {
-      const uid = userAuth.uid;
-      const email = userAuth.email?.toLowerCase();
+      const userAuth = auth.currentUser;
+      if (userAuth) {
+        const uid = userAuth.uid;
+        const email = userAuth.email?.trim().toLowerCase();
 
-      console.log("Starting account deletion for UID:", uid);
+        console.log("Starting account deletion for UID:", uid, "Email:", email);
 
-      // 3. DELETE CONNECTIONS FIRST
-      // Query connections where personalId == uid
-      const qPersonal = query(collection(db, "connections"), where("personalId", "==", uid));
-      const personalSnap = await getDocs(qPersonal);
-      for (const d of personalSnap.docs) {
-        await deleteDoc(d.ref);
-        console.log("Deleted connection (personal):", d.id);
+        // 1. Fetch all related documents to delete
+        // We delete connections, workouts, assessments, and invitations to ensure no orphans
+        const [connSnap, connSnap2, workSnap, workSnap2, asseSnap, asseSnap2, invSnap, invSnap2, invSnap3] = await Promise.all([
+          getDocs(query(collection(db, "connections"), where("studentId", "==", uid))),
+          getDocs(query(collection(db, "connections"), where("personalId", "==", uid))),
+          getDocs(query(collection(db, "workouts"), where("studentId", "==", uid))),
+          getDocs(query(collection(db, "workouts"), where("personalId", "==", uid))),
+          getDocs(query(collection(db, "assessments"), where("studentId", "==", uid))),
+          getDocs(query(collection(db, "assessments"), where("personalId", "==", uid))),
+          getDocs(query(collection(db, "invitations"), where("studentId", "==", uid))),
+          getDocs(query(collection(db, "invitations"), where("personalId", "==", uid))),
+          getDocs(query(collection(db, "invitations"), where("studentEmail", "==", email || "")))
+        ]);
+
+        console.log(`Found documents to delete: 
+          Connections: ${connSnap.size + connSnap2.size}, 
+          Workouts: ${workSnap.size + workSnap2.size}, 
+          Assessments: ${asseSnap.size + asseSnap2.size}, 
+          Invitations: ${invSnap.size + invSnap2.size + invSnap3.size}`);
+
+        // 2. Prepare batch deletion
+        const batch = writeBatch(db);
+        
+        // Delete profile documents
+        batch.delete(doc(db, "users_public", uid));
+        batch.delete(doc(db, "users_private", uid));
+        
+        if (email) {
+          batch.delete(doc(db, "user_emails", email));
+        }
+
+        // Add all fetched documents to batch
+        const allSnaps = [connSnap, connSnap2, workSnap, workSnap2, asseSnap, asseSnap2, invSnap, invSnap2, invSnap3];
+        allSnaps.forEach(snap => {
+          snap.docs.forEach(d => batch.delete(d.ref));
+        });
+
+        // 3. Commit Firestore changes
+        await batch.commit().catch(err => {
+          console.error("Firestore batch commit failed:", err);
+          handleFirestoreError(err, OperationType.WRITE, "account_cleanup");
+        });
+        
+        console.log("Firestore data deleted successfully");
+
+        // 4. Delete from Auth
+        await deleteUser(userAuth);
+        console.log("Auth user deleted successfully");
+        
+        setShowDeleteAccountModal(false);
+        window.location.href = "/login";
       }
-
-      // Query connections where studentId == uid
-      const qStudent = query(collection(db, "connections"), where("studentId", "==", uid));
-      const studentSnap = await getDocs(qStudent);
-      for (const d of studentSnap.docs) {
-        await deleteDoc(d.ref);
-        console.log("Deleted connection (student):", d.id);
-      }
-
-      // 4. DELETE USER DATA
-      // users_public/{uid}
-      await deleteDoc(doc(db, "users_public", uid));
-      console.log("Deleted users_public document");
-
-      // users_private/{uid}
-      await deleteDoc(doc(db, "users_private", uid));
-      console.log("Deleted users_private document");
-
-      // user_emails/{email}
-      if (email) {
-        await deleteDoc(doc(db, "user_emails", email));
-        console.log("Deleted user_emails document");
-      }
-
-      // 5. ONLY AFTER ALL DELETES
-      await deleteUser(userAuth);
-      console.log("User deleted from Firebase Authentication");
-
-      setShowDeleteAccountModal(false);
-      window.location.href = "/login";
     } catch (err: any) {
       console.error("Delete account error:", err);
       if (err.code === "auth/requires-recent-login") {
         alert("Para sua segurança, você precisa ter feito login recentemente para excluir sua conta. Por favor, saia e entre novamente antes de tentar excluir.");
       } else {
-        alert("Ocorreu um erro ao excluir sua conta. Por favor, tente novamente mais tarde.");
+        let errorMessage = "Ocorreu um erro ao excluir sua conta. Tente novamente mais tarde.";
+        try {
+          // If it's a JSON string from our error handler, try to parse it
+          const parsed = JSON.parse(err.message);
+          if (parsed.error?.includes("permissions")) {
+            errorMessage = "Erro de permissão ao excluir conta. Por favor, tente sair e entrar novamente.";
+          }
+        } catch {
+          if (err.message?.includes("permissions")) {
+            errorMessage = "Erro de permissão ao excluir conta. Por favor, tente sair e entrar novamente.";
+          }
+        }
+        alert(errorMessage);
       }
     } finally {
       setIsDeletingAccount(false);
