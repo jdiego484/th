@@ -37,14 +37,32 @@ import {
 } from "firebase/firestore";
 
 const openWhatsApp = (phone?: string) => {
+  console.log("Telefone recebido:", phone);
+
   if (!phone) {
-    alert("WhatsApp não cadastrado para este usuário.");
+    alert("TESTE: telefone não encontrado");
     return;
   }
-  const cleanPhone = phone.replace(/\D/g, "");
-  window.open(`https://wa.me/${cleanPhone}`, "_blank");
-};
 
+  let cleanPhone = phone.replace(/\D/g, "");
+
+  // garante código do Brasil
+  if (!cleanPhone.startsWith("55")) {
+    cleanPhone = "55" + cleanPhone;
+  }
+
+  const url = `https://wa.me/${cleanPhone}`;
+  console.log("URL gerada:", url);
+
+  // forma mais confiável (evita bloqueio)
+  const a = document.createElement("a");
+  a.href = url;
+  a.target = "_blank";
+  a.rel = "noopener noreferrer";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+};
 function Login() {
   const [isLogin, setIsLogin] = useState(true);
   const [isForgotPassword, setIsForgotPassword] = useState(false);
