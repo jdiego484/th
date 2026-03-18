@@ -36,7 +36,10 @@ import {
 } from "firebase/firestore";
 
 const openWhatsApp = (phone?: string) => {
-  console.log("Telefone recebido:", phone);
+  console.log("TESTE WHATSAPP:", phone);
+
+  window.open("https://wa.me/5534988785455", "_blank");
+};
 
   if (!phone) {
     alert("Número de WhatsApp não cadastrado para este usuário.");
