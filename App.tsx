@@ -42,7 +42,7 @@ const openWhatsApp = (phone?: string) => {
 };
 
   if (!phone) {
-    alert("TESTE Número de WhatsApp não cadastrado para este usuário.");
+    alert("Número de WhatsApp não cadastrado para este usuário.");
     return;
   }
 
