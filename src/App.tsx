@@ -38,7 +38,7 @@ import {
 
 const openWhatsApp = (phone?: string) => {
   if (!phone) {
-    alert("Número de WhatsApp não cadastrado para este usuário.");
+    alert("WhatsApp não cadastrado para este usuário.");
     return;
   }
   const cleanPhone = phone.replace(/\D/g, "");
