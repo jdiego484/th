@@ -775,7 +775,7 @@ function WorkoutBuilder({ client, onBack, existingWorkout, personalOverrideId }:
           </h2>
           <p className="text-sm text-neutral-400">Aluno: <span className="text-orange-500 font-medium">{client.name}</span></p>
         </div>
-        <div className="ml-auto"> <h1>TESTE WHATSAPP 123</h1>
+        <div className="ml-auto"> 
           <button 
             onClick={() => setShowCopyModal(true)}
             className="flex items-center gap-2 bg-neutral-800 hover:bg-neutral-700 text-white px-4 py-2 rounded-xl border border-white/10 transition-colors text-sm font-medium"
@@ -1897,7 +1897,7 @@ onClick={() => openWhatsApp("5534988785455")}
   return (
     <div className="space-y-6">
       <div className="bg-neutral-900 p-6 rounded-3xl border border-white/10 shadow-2xl text-center mb-8 bg-gradient-to-br from-neutral-900 to-neutral-950">
-        <h3 className="text-neutral-400 text-xs font-medium mb-2 uppercase tracking-widest">Seu Código de Convite</h3>
+        <h3 className="text-neutral-400 text-xs font-medium mb-2 uppercase tracking-widest">Seu Código de Convite</h3> <h1>TESTE WHATSAPP 123</h1>
         <div className="flex flex-col items-center gap-3">
           <div className="flex items-center gap-2">
             <div className="text-3xl font-black text-orange-500 font-mono tracking-tighter bg-orange-600/10 px-6 py-4 rounded-2xl border border-orange-500/20 shadow-[0_0_20px_rgba(249,115,22,0.1)]">
