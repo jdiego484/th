@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from "react";
 import { onAuthStateChanged, signOut } from "firebase/auth";
-import { doc, onSnapshot } from "firebase/firestore";
+import { doc, onSnapshot, updateDoc } from "firebase/firestore";
 import { auth, db } from "../firebase";
 import { handleFirestoreError, OperationType } from "../utils/firestoreErrors";
 
@@ -76,6 +76,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               id: firebaseUser.uid,
               role: publicData.role === "client" ? "student" : publicData.role
             };
+
+            // Sync phone to public profile if missing there but present in private
+            if (privateData?.phone && !publicData?.phone) {
+              console.log("AuthProvider: Sincronizando telefone para perfil público...");
+              updateDoc(publicDocRef, { phone: privateData.phone }).catch(e => {
+                console.error("Erro ao sincronizar telefone:", e);
+              });
+            }
 
             setUser(combinedUser);
             setAuthError(null);

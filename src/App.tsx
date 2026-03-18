@@ -154,7 +154,8 @@ function Login() {
           profileCompleted: false,
           gender: gender,
           crefNumber: "",
-          createdAt: new Date().toISOString()
+          createdAt: new Date().toISOString(),
+          phone: phone.trim()
         });
 
         // Private data
@@ -1639,6 +1640,7 @@ function PersonalDashboard() {
       const data = connectionDoc.data();
       try {
         const clientDoc = await getDoc(doc(db, "users_public", data.studentId));
+        const publicData = clientDoc.exists() ? clientDoc.data() : {};
         let privateData = {};
         try {
           const privateDoc = await getDoc(doc(db, "users_private", data.studentId));
@@ -1651,7 +1653,7 @@ function PersonalDashboard() {
 
         return { 
           id: clientDoc.id, 
-          ...clientDoc.data(), 
+          ...publicData, 
           ...privateData,
           status: data.status,
           connectionId: connectionDoc.id,
@@ -2841,7 +2843,26 @@ function ClientDashboard({ onViewAllWorkouts, onViewSubscriptions }: { onViewAll
 
     // Sort by date descending
     workoutsData.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-    setWorkouts(workoutsData);
+    const workoutsWithPhone = await Promise.all(workoutsData.map(async (workout) => {
+      try {
+        const personalDoc = await getDoc(doc(db, "users_public", workout.personalId));
+        let phone = personalDoc.exists() ? personalDoc.data().phone : "";
+        
+        if (!phone) {
+          const privateDoc = await getDoc(doc(db, "users_private", workout.personalId));
+          if (privateDoc.exists()) {
+            phone = privateDoc.data().phone;
+          }
+        }
+        
+        return { ...workout, personalPhone: phone };
+      } catch (e) {
+        console.error("Error fetching personal phone for workout:", e);
+        return workout;
+      }
+    }));
+
+    setWorkouts(workoutsWithPhone);
   };
 
   const fetchPersonals = async () => {
@@ -2853,6 +2874,7 @@ function ClientDashboard({ onViewAllWorkouts, onViewSubscriptions }: { onViewAll
       const data = connectionDoc.data();
       try {
         const personalDoc = await getDoc(doc(db, "users_public", data.personalId));
+        const publicData = personalDoc.exists() ? personalDoc.data() : {};
         let privateData = {};
         try {
           const privateDoc = await getDoc(doc(db, "users_private", data.personalId));
@@ -2865,7 +2887,7 @@ function ClientDashboard({ onViewAllWorkouts, onViewSubscriptions }: { onViewAll
 
         return { 
           id: personalDoc.id, 
-          ...personalDoc.data(), 
+          ...publicData, 
           ...privateData,
           status: data.status 
         };
@@ -3252,6 +3274,7 @@ function CompleteProfile({ isEditing = false, userOverride = null, onComplete = 
         photoUrl,
         city,
         gender,
+        phone,
         profileCompleted: true,
         ...(user.role === "personal" ? { crefNumber: cref } : {})
       };
@@ -4528,12 +4551,27 @@ function AdminUserEditView({
   onDeleteUser: (id: string) => void,
   connections: any[]
 }) {
-  const userConnection = connections.find(c => c.client_id === user.id);
-
+  const [localUser, setLocalUser] = useState(user);
   const [activeTab, setActiveTab] = useState<"workouts" | "profile">(user.role === 'student' ? "workouts" : "profile");
   const [localRole, setLocalRole] = useState(user.role);
   const [localBlocked, setLocalBlocked] = useState(!!user.blocked);
   const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => {
+    const fetchPrivateData = async () => {
+      try {
+        const privateDoc = await getDoc(doc(db, "users_private", user.id));
+        if (privateDoc.exists()) {
+          setLocalUser(prev => ({ ...prev, ...privateDoc.data() }));
+        }
+      } catch (err) {
+        console.error("Error fetching private data for admin view:", err);
+      }
+    };
+    fetchPrivateData();
+  }, [user.id]);
+
+  const userConnection = connections.find(c => c.client_id === user.id);
 
   const handleConfirmChanges = async () => {
     setIsSaving(true);
@@ -4601,16 +4639,16 @@ function AdminUserEditView({
         <div className="lg:col-span-1 space-y-6">
           <div className="bg-neutral-900 p-6 rounded-3xl border border-white/10 shadow-2xl space-y-6">
             <div className="flex flex-col items-center text-center space-y-4">
-              {user.photoUrl ? (
-                <img src={user.photoUrl} alt="" className="w-24 h-24 rounded-full object-cover border-4 border-orange-500/20 shadow-xl shadow-orange-500/10" />
+              {localUser.photoUrl ? (
+                <img src={localUser.photoUrl} alt="" className="w-24 h-24 rounded-full object-cover border-4 border-orange-500/20 shadow-xl shadow-orange-500/10" />
               ) : (
                 <div className="w-24 h-24 bg-orange-500/10 rounded-full flex items-center justify-center text-orange-500 font-bold text-3xl border-4 border-orange-500/20 shadow-xl shadow-orange-500/10">
-                  {user.name?.charAt(0).toUpperCase()}
+                  {localUser.name?.charAt(0).toUpperCase()}
                 </div>
               )}
               <div>
-                <h3 className="text-xl font-black text-white">{user.name}</h3>
-                <p className="text-neutral-500 text-sm">{user.email}</p>
+                <h3 className="text-xl font-black text-white">{localUser.name}</h3>
+                <p className="text-neutral-500 text-sm">{localUser.email}</p>
               </div>
             </div>
 
@@ -4669,7 +4707,7 @@ function AdminUserEditView({
                   {localBlocked ? 'Desbloquear' : 'Bloquear'}
                 </button>
                 <button 
-                  onClick={() => openWhatsApp(user.phone)}
+                  onClick={() => openWhatsApp(localUser.phone)}
                   className="flex items-center justify-center gap-2 py-3 bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 rounded-xl font-bold text-xs hover:bg-emerald-500/20 transition-all"
                 >
                   <MessageCircle className="w-4 h-4" />
@@ -4718,16 +4756,16 @@ function AdminUserEditView({
             <div className="space-y-4">
               <div className="flex justify-between items-center">
                 <span className="text-xs text-neutral-500">ID do Usuário</span>
-                <span className="text-xs font-mono text-white bg-white/5 px-2 py-1 rounded">{user.id.substring(0, 8)}...</span>
+                <span className="text-xs font-mono text-white bg-white/5 px-2 py-1 rounded">{localUser.id.substring(0, 8)}...</span>
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-xs text-neutral-500">Criado em</span>
-                <span className="text-xs text-white">{user.createdAt ? new Date(user.createdAt).toLocaleDateString('pt-BR') : 'N/A'}</span>
+                <span className="text-xs text-white">{localUser.createdAt ? new Date(localUser.createdAt).toLocaleDateString('pt-BR') : 'N/A'}</span>
               </div>
-              {user.role === 'personal' && (
+              {localUser.role === 'personal' && (
                 <div className="flex justify-between items-center">
                   <span className="text-xs text-neutral-500">Código Personal</span>
-                  <span className="text-xs font-bold text-orange-500">{user.personalCode || 'N/A'}</span>
+                  <span className="text-xs font-bold text-orange-500">{localUser.personalCode || 'N/A'}</span>
                 </div>
               )}
             </div>
