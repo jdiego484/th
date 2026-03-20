@@ -1,9 +1,10 @@
 import { useState, useEffect, FormEvent, useRef, ChangeEvent } from "react";
-import { collection, query, where, getDocs, addDoc, orderBy } from "firebase/firestore";
+import { collection, query, where, getDocs, addDoc, orderBy, doc, getDoc } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
-import { db, storage } from "../firebase";
+import { db, storage, auth } from "../firebase";
 import { ArrowLeft, Plus, Activity, LineChart as LineChartIcon, History, Scale, Ruler, Camera, Image as ImageIcon, Trash2, Eye, X } from "lucide-react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
+import { handleFirestoreError, OperationType } from "../utils/firestoreErrors";
 
 export function AssessmentView({ clientId, clientName, onBack, isPersonal }: { clientId: string, clientName: string, onBack: () => void, isPersonal: boolean }) {
   const [assessments, setAssessments] = useState<any[]>([]);
@@ -31,15 +32,22 @@ export function AssessmentView({ clientId, clientName, onBack, isPersonal }: { c
   }, [clientId]);
 
   const fetchAssessments = async () => {
-    const q = query(
-      collection(db, "assessments"), 
-      where("studentId", "==", clientId)
-    );
-    const querySnapshot = await getDocs(q);
-    const data = querySnapshot.docs.map(doc => ({ id: doc.id, ...(doc.data() as any) }));
-    // Sort by date ascending for the chart
-    data.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-    setAssessments(data);
+    try {
+      const q = query(
+        collection(db, "assessments"), 
+        where("studentId", "==", clientId)
+      );
+      const querySnapshot = await getDocs(q).catch(err => {
+        handleFirestoreError(err, OperationType.LIST, "assessments");
+        throw err;
+      });
+      const data = querySnapshot.docs.map(doc => ({ id: doc.id, ...(doc.data() as any) }));
+      // Sort by date ascending for the chart
+      data.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+      setAssessments(data);
+    } catch (err) {
+      console.error("Error fetching assessments:", err);
+    }
   };
 
   const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
@@ -76,8 +84,21 @@ export function AssessmentView({ clientId, clientName, onBack, isPersonal }: { c
         uploadedPhotoUrls.push(url);
       }
 
+      // Get personalId if not provided (if student is filling it out)
+      let personalId = null;
+      if (isPersonal) {
+        personalId = auth.currentUser?.uid;
+      } else {
+        // If student is filling it out, try to get their personal trainer's ID
+        const privateDoc = await getDoc(doc(db, "users_private", clientId));
+        if (privateDoc.exists()) {
+          personalId = privateDoc.data().personalId;
+        }
+      }
+
       await addDoc(collection(db, "assessments"), {
         studentId: clientId,
+        personalId: personalId,
         date,
         weight: parseFloat(weight) || 0,
         height: parseFloat(height) || 0,
@@ -91,7 +112,11 @@ export function AssessmentView({ clientId, clientName, onBack, isPersonal }: { c
         calves: parseFloat(calves) || 0,
         photos: uploadedPhotoUrls,
         createdAt: new Date().toISOString()
+      }).catch(err => {
+        handleFirestoreError(err, OperationType.CREATE, "assessments");
+        throw err;
       });
+      
       alert("Avaliação salva com sucesso!");
       setShowAddForm(false);
       fetchAssessments();
@@ -100,9 +125,22 @@ export function AssessmentView({ clientId, clientName, onBack, isPersonal }: { c
       setWeight(""); setHeight(""); setBodyFat(""); setMuscleMass("");
       setChest(""); setWaist(""); setHips(""); setArms(""); setThighs(""); setCalves("");
       setPhotos([]);
-    } catch (err) {
-      console.error(err);
-      alert("Erro ao salvar avaliação.");
+    } catch (err: any) {
+      console.error("Error saving assessment:", err);
+      
+      let errorMessage = "Verifique sua conexão e permissões.";
+      try {
+        if (err.message && err.message.startsWith('{')) {
+          const errInfo = JSON.parse(err.message);
+          errorMessage = `Erro no Firestore (${errInfo.operationType} em ${errInfo.path}): ${errInfo.error}`;
+        } else if (err.message) {
+          errorMessage = err.message;
+        }
+      } catch (e) {
+        if (err.message) errorMessage = err.message;
+      }
+      
+      alert(`Erro ao salvar avaliação: ${errorMessage}`);
     } finally {
       setIsSubmitting(false);
     }

@@ -589,7 +589,7 @@ function WorkoutBuilder({ client, onBack, existingWorkout, personalOverrideId }:
       const querySnapshot = await getDocs(q);
       const workoutsData = await Promise.all(querySnapshot.docs.map(async (workoutDoc) => {
         const data = workoutDoc.data();
-        const exercisesQ = query(collection(db, "exercises"), where("workoutId", "==", workoutDoc.id), orderBy("order", "asc"));
+        const exercisesQ = query(collection(db, "workouts", workoutDoc.id, "exercises"), orderBy("order", "asc"));
         const exercisesSnapshot = await getDocs(exercisesQ);
         const exercises = exercisesSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
         return { id: workoutDoc.id, ...data, exercises };
@@ -685,7 +685,7 @@ function WorkoutBuilder({ client, onBack, existingWorkout, personalOverrideId }:
       batch.delete(doc(db, "workouts", id));
       
       // Delete associated exercises
-      const q = query(collection(db, "exercises"), where("workoutId", "==", id));
+      const q = query(collection(db, "workouts", id, "exercises"));
       const exerciseSnapshot = await getDocs(q);
       exerciseSnapshot.docs.forEach(exDoc => {
         batch.delete(exDoc.ref);
@@ -701,52 +701,97 @@ function WorkoutBuilder({ client, onBack, existingWorkout, personalOverrideId }:
   };
 
   const saveWorkout = async () => {
-    if (exercises.length === 0 || !personalId) return;
+    if (exercises.length === 0) {
+      alert("Adicione pelo menos um exercício ao treino.");
+      return;
+    }
+
+    if (!personalId) {
+      alert("Erro: ID do personal não encontrado. Por favor, tente fazer login novamente.");
+      console.error("personalId is missing in WorkoutBuilder", { user, personalOverrideId });
+      return;
+    }
+
+    if (!client?.id) {
+      alert("Erro: ID do aluno não encontrado.");
+      console.error("client.id is missing in WorkoutBuilder", { client });
+      return;
+    }
+
     setIsSaving(true);
     try {
+      // Ensure the date is correctly formatted for Firestore
       const dateObj = new Date(`${workoutDate}T12:00:00Z`);
+      if (isNaN(dateObj.getTime())) {
+        throw new Error("Data de treino inválida. Por favor, selecione uma data válida.");
+      }
       
       const workoutData = {
         personalId: personalId,
         studentId: client.id,
         date: dateObj.toISOString(),
         status: existingWorkout?.status || "active",
-        createdAt: existingWorkout?.createdAt || new Date().toISOString()
+        createdAt: existingWorkout?.createdAt || new Date().toISOString(),
+        updatedAt: new Date().toISOString()
       };
 
       const batch = writeBatch(db);
-      let workoutId = existingWorkout?.id;
+      const workoutRef = existingWorkout?.id 
+        ? doc(db, "workouts", existingWorkout.id)
+        : doc(collection(db, "workouts"));
 
-      if (workoutId) {
-        batch.update(doc(db, "workouts", workoutId), workoutData);
-        
-        // Delete old exercises to replace them
-        const q = query(collection(db, "exercises"), where("workoutId", "==", workoutId));
-        const oldExercises = await getDocs(q);
-        oldExercises.docs.forEach(exDoc => batch.delete(exDoc.ref));
-      } else {
-        const newWorkoutRef = doc(collection(db, "workouts"));
-        workoutId = newWorkoutRef.id;
-        batch.set(newWorkoutRef, workoutData);
-      }
+      const workoutId = workoutRef.id;
 
-      // Add new exercises
+      batch.set(workoutRef, {
+        ...workoutData,
+        personalId: personalId,
+        studentId: client.id,
+        date: dateObj.toISOString(),
+        status: existingWorkout?.status || "active",
+        createdAt: existingWorkout?.createdAt || new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
+
+      // 🔥 NEW: use subcollection
       exercises.forEach((ex, index) => {
-        const exRef = doc(collection(db, "exercises"));
+        const exRef = doc(collection(db, "workouts", workoutId, "exercises"));
+
+        // Remove the 'id' from the data to avoid confusion, as Firestore generates its own
+        const { id, ...exData } = ex;
+
         batch.set(exRef, {
-          ...ex,
-          workoutId,
-          order: index
+          ...exData,
+          order: index,
+          createdAt: new Date().toISOString()
         });
       });
 
-      await batch.commit();
+      await batch.commit().catch(err => {
+        handleFirestoreError(err, OperationType.WRITE, "workouts/exercises batch");
+        throw err;
+      });
+      
       alert(existingWorkout?.id ? "Treino atualizado com sucesso!" : "Treino salvo com sucesso!");
       localStorage.removeItem(draftKey);
       onBack();
-    } catch (err) {
-      console.error(err);
-      alert("Erro ao salvar treino.");
+    } catch (err: any) {
+      console.error("Error saving workout:", err);
+      
+      let errorMessage = "Verifique sua conexão e permissões.";
+      
+      // Try to parse JSON error from handleFirestoreError
+      try {
+        if (err.message && err.message.startsWith('{')) {
+          const errInfo = JSON.parse(err.message);
+          errorMessage = `Erro no Firestore (${errInfo.operationType} em ${errInfo.path}): ${errInfo.error}`;
+        } else if (err.message) {
+          errorMessage = err.message;
+        }
+      } catch (e) {
+        if (err.message) errorMessage = err.message;
+      }
+      
+      alert(`Erro ao salvar treino: ${errorMessage}`);
     } finally {
       setIsSaving(false);
     }
@@ -1316,14 +1361,46 @@ function WorkoutHistory({ client, onBack }: { client: any, onBack: () => void })
     }
     
     try {
-      console.log("WorkoutHistory: Calling deleteDoc for:", id);
-      await deleteDoc(doc(db, "workouts", id));
-      console.log("WorkoutHistory: deleteDoc successful");
+      const batch = writeBatch(db);
+      
+      // Delete workout document
+      batch.delete(doc(db, "workouts", id));
+      
+      // Delete associated exercises
+      const q = query(collection(db, "workouts", id, "exercises"));
+      const exerciseSnapshot = await getDocs(q).catch(err => {
+        handleFirestoreError(err, OperationType.LIST, "exercises");
+        throw err;
+      });
+      
+      exerciseSnapshot.docs.forEach(exDoc => {
+        batch.delete(exDoc.ref);
+      });
+      
+      await batch.commit().catch(err => {
+        handleFirestoreError(err, OperationType.WRITE, "workouts/exercises batch delete");
+        throw err;
+      });
+      
+      console.log("WorkoutHistory: Batch delete successful");
       setWorkouts(prev => prev.filter(w => w.id !== id));
       alert("Treino excluído com sucesso!");
     } catch (error: any) {
       console.error("WorkoutHistory: Error deleting workout:", error);
-      alert("Erro ao excluir treino: " + (error.message || "Verifique suas permissões."));
+      
+      let errorMessage = "Verifique sua conexão e permissões.";
+      try {
+        if (error.message && error.message.startsWith('{')) {
+          const errInfo = JSON.parse(error.message);
+          errorMessage = `Erro no Firestore (${errInfo.operationType} em ${errInfo.path}): ${errInfo.error}`;
+        } else if (error.message) {
+          errorMessage = error.message;
+        }
+      } catch (e) {
+        if (error.message) errorMessage = error.message;
+      }
+      
+      alert(`Erro ao excluir treino: ${errorMessage}`);
     }
   };
 
@@ -1710,6 +1787,15 @@ function PersonalDashboard() {
           status: "active",
           createdAt: new Date().toISOString()
         }).catch(err => handleFirestoreError(err, OperationType.CREATE, "connections"));
+
+        // Update student's personalId in public and private profiles
+        try {
+          await updateDoc(doc(db, "users_public", clientId), { personalId: user?.id });
+          await updateDoc(doc(db, "users_private", clientId), { personalId: user?.id });
+        } catch (e) {
+          console.warn("Could not update personalId in student profiles, but connection was created:", e);
+        }
+
         fetchClients();
         setShowAdd(false);
       }
@@ -1750,6 +1836,15 @@ function PersonalDashboard() {
     try {
       const connectionId = `${user?.id}_${clientId}`;
       await deleteDoc(doc(db, "connections", connectionId));
+      
+      // Clear student's personalId in public and private profiles
+      try {
+        await updateDoc(doc(db, "users_public", clientId), { personalId: null });
+        await updateDoc(doc(db, "users_private", clientId), { personalId: null });
+      } catch (e) {
+        console.warn("Could not clear personalId in student profiles, but connection was deleted:", e);
+      }
+
       fetchClients();
       alert("Aluno removido com sucesso!");
     } catch (err) {
@@ -2172,7 +2267,7 @@ function ClientWorkoutView({ workout, onBack, isPersonal: isPersonalProp }: { wo
     if (!workout.exercises) {
       const fetchExercises = async () => {
         try {
-          const q = query(collection(db, "exercises"), where("workoutId", "==", workout.id));
+          const q = query(collection(db, "workouts", workout.id, "exercises"));
           const snapshot = await getDocs(q);
           const exData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
           // Sort manually if order field exists
@@ -2320,15 +2415,47 @@ function ClientWorkoutView({ workout, onBack, isPersonal: isPersonalProp }: { wo
     }
     
     try {
-      console.log("ClientWorkoutView: Calling deleteDoc for:", workout.id);
-      await deleteDoc(doc(db, "workouts", workout.id));
+      const batch = writeBatch(db);
+      
+      // Delete workout document
+      batch.delete(doc(db, "workouts", workout.id));
+      
+      // Delete associated exercises
+      const q = query(collection(db, "workouts", workout.id, "exercises"));
+      const exerciseSnapshot = await getDocs(q).catch(err => {
+        handleFirestoreError(err, OperationType.LIST, "exercises");
+        throw err;
+      });
+      
+      exerciseSnapshot.docs.forEach(exDoc => {
+        batch.delete(exDoc.ref);
+      });
+      
+      await batch.commit().catch(err => {
+        handleFirestoreError(err, OperationType.WRITE, "workouts/exercises batch delete");
+        throw err;
+      });
+      
       localStorage.removeItem(storageKey);
-      console.log("ClientWorkoutView: deleteDoc successful");
+      console.log("ClientWorkoutView: Batch delete successful");
       alert("Treino excluído com sucesso!");
       onBack();
     } catch (error: any) {
       console.error("ClientWorkoutView: Error deleting workout:", error);
-      alert("Erro ao excluir treino: " + (error.message || "Verifique suas permissões."));
+      
+      let errorMessage = "Verifique sua conexão e permissões.";
+      try {
+        if (error.message && error.message.startsWith('{')) {
+          const errInfo = JSON.parse(error.message);
+          errorMessage = `Erro no Firestore (${errInfo.operationType} em ${errInfo.path}): ${errInfo.error}`;
+        } else if (error.message) {
+          errorMessage = error.message;
+        }
+      } catch (e) {
+        if (error.message) errorMessage = error.message;
+      }
+      
+      alert(`Erro ao excluir treino: ${errorMessage}`);
     }
   };
 
@@ -2406,6 +2533,9 @@ function ClientWorkoutView({ workout, onBack, isPersonal: isPersonalProp }: { wo
         overallFeedback,
         completedAt: new Date().toISOString(),
         duration: duration // duration in seconds
+      }).catch(err => {
+        handleFirestoreError(err, OperationType.UPDATE, "workouts");
+        throw err;
       });
       console.log("ClientWorkoutView: Workout update successful");
       localStorage.removeItem(storageKey);
@@ -2413,7 +2543,20 @@ function ClientWorkoutView({ workout, onBack, isPersonal: isPersonalProp }: { wo
       onBack();
     } catch (error: any) {
       console.error("ClientWorkoutView: Error finishing workout:", error);
-      alert("Erro ao finalizar treino: " + (error.message || "Erro desconhecido"));
+      
+      let errorMessage = "Verifique sua conexão e permissões.";
+      try {
+        if (error.message && error.message.startsWith('{')) {
+          const errInfo = JSON.parse(error.message);
+          errorMessage = `Erro no Firestore (${errInfo.operationType} em ${errInfo.path}): ${errInfo.error}`;
+        } else if (error.message) {
+          errorMessage = error.message;
+        }
+      } catch (e) {
+        if (error.message) errorMessage = error.message;
+      }
+      
+      alert(`Erro ao finalizar treino: ${errorMessage}`);
     } finally {
       setIsFinishing(false);
     }
@@ -2840,21 +2983,33 @@ function ClientDashboard({ onViewAllWorkouts, onViewSubscriptions }: { onViewAll
         status: "active",
         createdAt: new Date().toISOString()
       });
+
+      // Update student's personalId in public and private profiles
+      batch.update(doc(db, "users_public", user.id), { personalId: invitation.personalId });
+      batch.update(doc(db, "users_private", user.id), { personalId: invitation.personalId });
       
-      await batch.commit();
+      await batch.commit().catch(err => {
+        handleFirestoreError(err, OperationType.WRITE, "acceptInvitation batch");
+        throw err;
+      });
       setPendingInvitations(prev => prev.filter(i => i.id !== invitation.id));
       fetchPersonals();
-    } catch (err) {
+    } catch (err: any) {
       console.error("Error accepting invitation:", err);
+      alert("Erro ao aceitar convite: " + (err.message || "Verifique sua conexão."));
     }
   };
 
   const rejectInvitation = async (invitationId: string) => {
     try {
-      await updateDoc(doc(db, "invitations", invitationId), { status: "rejected" });
+      await updateDoc(doc(db, "invitations", invitationId), { status: "rejected" }).catch(err => {
+        handleFirestoreError(err, OperationType.UPDATE, "invitations");
+        throw err;
+      });
       setPendingInvitations(prev => prev.filter(i => i.id !== invitationId));
-    } catch (err) {
+    } catch (err: any) {
       console.error("Error rejecting invitation:", err);
+      alert("Erro ao rejeitar convite: " + (err.message || "Verifique sua conexão."));
     }
   };
 

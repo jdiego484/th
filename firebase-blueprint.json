@@ -11,7 +11,8 @@
         "role": { "type": "string", "enum": ["personal", "student"] },
         "personalCode": { "type": "string" },
         "gender": { "type": "string" },
-        "crefNumber": { "type": "string" }
+        "crefNumber": { "type": "string" },
+        "personalId": { "type": "string", "description": "ID of the personal trainer connected to this student." }
       },
       "required": ["name", "role"]
     },
@@ -27,7 +28,8 @@
         "cep": { "type": "string" },
         "address": { "type": "string" },
         "medicalHistory": { "type": "string" },
-        "medications": { "type": "string" }
+        "medications": { "type": "string" },
+        "personalId": { "type": "string", "description": "ID of the personal trainer connected to this student." }
       },
       "required": ["email"]
     },
@@ -83,13 +85,13 @@
       "description": "An exercise within a workout.",
       "type": "object",
       "properties": {
-        "workoutId": { "type": "string" },
         "name": { "type": "string" },
         "sets": { "type": "string" },
         "reps": { "type": "string" },
-        "rest": { "type": "string" }
+        "rest": { "type": "string" },
+        "order": { "type": "integer" }
       },
-      "required": ["workoutId", "name"]
+      "required": ["name"]
     },
     "Assessment": {
       "title": "Physical Assessment",
@@ -161,9 +163,9 @@
       "schema": "Workout",
       "description": "Workout plans."
     },
-    "/exercises/{exerciseId}": {
+    "/workouts/{workoutId}/exercises/{exerciseId}": {
       "schema": "Exercise",
-      "description": "Exercises."
+      "description": "Exercises within a workout."
     },
     "/assessments/{assessmentId}": {
       "schema": "Assessment",

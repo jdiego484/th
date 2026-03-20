@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from "react";
 import { onAuthStateChanged, signOut } from "firebase/auth";
-import { doc, onSnapshot, updateDoc } from "firebase/firestore";
+import { doc, onSnapshot, updateDoc, getDocFromServer } from "firebase/firestore";
 import { auth, db } from "../firebase";
 import { handleFirestoreError, OperationType } from "../utils/firestoreErrors";
 
@@ -41,6 +41,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     console.log("AuthProvider: Iniciando monitoramento...");
+
+    // Test Firestore connection on startup
+    const testConnection = async () => {
+      try {
+        // Use getDocFromServer to bypass cache and test real connection
+        await getDocFromServer(doc(db, 'system_messages', 'connection_test')).catch(e => {
+          // Ignore if document doesn't exist, we just want to test connection
+          if (e.code !== 'not-found' && e.message.includes('the client is offline')) {
+            console.error("Firestore connection test failed: client is offline. Check your Firebase configuration.");
+            setAuthError("Erro de conexão com o banco de dados. Verifique sua internet ou configuração.");
+          }
+        });
+      } catch (error) {
+        // Skip logging for most errors, as this is simply a connection test.
+      }
+    };
+    testConnection();
     
     let unsubPublic: (() => void) | null = null;
     let unsubPrivate: (() => void) | null = null;

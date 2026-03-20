@@ -2,102 +2,74 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // ===============================================================
-    // FUNÇÕES AUXILIARES (Padrão Profissional)
-    // ===============================================================
-
-    function isAuthenticated() {
+    function isAuth() {
       return request.auth != null;
     }
 
-    function isOwner(userId) {
-      return isAuthenticated() && request.auth.uid == userId;
+    function isOwner(uid) {
+      return request.auth.uid == uid;
     }
 
     function isAdmin() {
-      return isAuthenticated() && (
-        request.auth.token.email == "jdiego484@gmail.com" ||
-        (exists(/databases/$(database)/documents/users_public/$(request.auth.uid)) && 
-         get(/databases/$(database)/documents/users_public/$(request.auth.uid)).data.role == "superadmin")
-      );
+      return request.auth.token.email == "jdiego484@gmail.com";
     }
 
-    // Validação básica de segurança para strings
-    function isValidString(val, maxLen) {
-      return val is string && val.size() <= maxLen;
-    }
-
-    // ===============================================================
-    // REGRAS DE COLEÇÕES
-    // ===============================================================
-
-    // Perfil Público
+    // USERS PUBLIC
     match /users_public/{uid} {
-      allow read: if isAuthenticated();
-      allow create: if isOwner(uid); // Simples para não quebrar o registro
-      allow update: if isAdmin() || (
-        isOwner(uid) && 
-        // SEGURANÇA CRÍTICA: Usuário não pode mudar seu próprio cargo (role)
-        (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['role'])) &&
-        isValidString(request.resource.data.name, 100)
-      );
-      allow delete: if isAdmin();
+      allow read: if isAuth();
+      allow write: if isOwner(uid);
     }
 
-    // Dados Privados
+    // USERS PRIVATE
     match /users_private/{uid} {
-      allow read: if isOwner(uid) || isAdmin() || 
-        exists(/databases/$(database)/documents/connections/$(request.auth.uid + "_" + uid));
-      allow create: if isOwner(uid);
-      allow update: if isAdmin() || (
-        isOwner(uid) && 
-        isValidString(request.resource.data.get('phone', ''), 30)
-      );
-      allow delete: if isAdmin();
+      allow read: if isOwner(uid) || isAdmin();
+      allow write: if isOwner(uid);
     }
 
-    // Mapeamento de E-mail
-    match /user_emails/{email} {
-      allow read: if isAuthenticated();
-      allow create: if isAuthenticated() && request.resource.data.uid == request.auth.uid;
-      allow update, delete: if isAdmin() || (isAuthenticated() && resource.data.uid == request.auth.uid);
+    // CONNECTIONS
+    match /connections/{id} {
+      allow read, write: if isAuth();
     }
 
-    // Conexões
-    match /connections/{connectionId} {
-      allow read: if isAuthenticated() && (
-        request.auth.uid == resource.data.personalId || 
-        request.auth.uid == resource.data.studentId || 
-        isAdmin()
+    // WORKOUTS
+    match /workouts/{workoutId} {
+
+      allow create: if isAuth() &&
+        request.resource.data.personalId == request.auth.uid;
+
+      allow read: if isAuth() && (
+        resource.data.studentId == request.auth.uid ||
+        resource.data.personalId == request.auth.uid
       );
-      allow create: if isAuthenticated();
-      allow update, delete: if isAuthenticated() && (
-        request.auth.uid == resource.data.personalId || 
-        request.auth.uid == resource.data.studentId || 
-        isAdmin()
-      );
+
+      allow update, delete: if isAuth() &&
+        resource.data.personalId == request.auth.uid;
+
+      // 🔥 SUBCOLLECTION
+      match /exercises/{exerciseId} {
+
+        allow create: if isAuth();
+
+        allow read: if isAuth() && (
+          get(/databases/$(database)/documents/workouts/$(workoutId)).data.studentId == request.auth.uid ||
+          get(/databases/$(database)/documents/workouts/$(workoutId)).data.personalId == request.auth.uid
+        );
+
+        allow update, delete: if isAuth() &&
+          get(/databases/$(database)/documents/workouts/$(workoutId)).data.personalId == request.auth.uid;
+      }
     }
 
-    // Convites, Treinos, Avaliações e Chats
-    match /invitations/{id} { allow read, write: if isAuthenticated(); }
-    match /workouts/{id} { 
-      allow read: if isAuthenticated() && (request.auth.uid == resource.data.personalId || request.auth.uid == resource.data.studentId || isAdmin());
-      allow create: if isAuthenticated();
-      allow update, delete: if isAuthenticated() && (request.auth.uid == resource.data.personalId || isAdmin());
+    match /assessments/{id} {
+      allow read, write: if isAuth();
     }
-    match /exercises/{id} { allow read, write: if isAuthenticated(); }
-    match /assessments/{id} { 
-      allow read: if isAuthenticated() && (request.auth.uid == resource.data.personalId || request.auth.uid == resource.data.studentId || isAdmin());
-      allow create: if isAuthenticated();
-      allow update, delete: if isAuthenticated() && (request.auth.uid == resource.data.personalId || isAdmin());
+
+    match /chats/{id} {
+      allow read, write: if isAuth();
     }
-    match /chats/{id} { 
-      allow read, write: if isAuthenticated();
-      match /messages/{mid} { allow read, write: if isAuthenticated(); }
-    }
-    match /system_messages/{id} { 
-      allow read: if isAuthenticated();
-      allow write: if isAdmin();
+
+    match /invitations/{id} {
+      allow read, write: if isAuth();
     }
   }
 }
