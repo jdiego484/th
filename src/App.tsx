@@ -1788,9 +1788,9 @@ function PersonalDashboard() {
     
     const newCode = Math.random().toString(36).substring(2, 8).toUpperCase();
     try {
-      await updateDoc(doc(db, "users_public", user.id), {
+      await setDoc(doc(db, "users_public", user.id), {
         personalCode: newCode
-      });
+      }, { merge: true });
     } catch (err) {
       console.error("Erro ao gerar código personal:", err);
     }
@@ -1911,8 +1911,8 @@ function PersonalDashboard() {
 
         // Update student's personalId in public and private profiles
         try {
-          await updateDoc(doc(db, "users_public", clientId), { personalId: user?.id });
-          await updateDoc(doc(db, "users_private", clientId), { personalId: user?.id });
+          await setDoc(doc(db, "users_public", clientId), { personalId: user?.id }, { merge: true });
+          await setDoc(doc(db, "users_private", clientId), { personalId: user?.id }, { merge: true });
         } catch (e) {
           console.warn("Could not update personalId in student profiles, but connection was created:", e);
         }
@@ -1960,8 +1960,8 @@ function PersonalDashboard() {
       
       // Clear student's personalId in public and private profiles
       try {
-        await updateDoc(doc(db, "users_public", clientId), { personalId: null });
-        await updateDoc(doc(db, "users_private", clientId), { personalId: null });
+        await setDoc(doc(db, "users_public", clientId), { personalId: null }, { merge: true });
+        await setDoc(doc(db, "users_private", clientId), { personalId: null }, { merge: true });
       } catch (e) {
         console.warn("Could not clear personalId in student profiles, but connection was deleted:", e);
       }
@@ -3172,8 +3172,8 @@ function ClientDashboard({ onViewAllWorkouts, onViewSubscriptions }: { onViewAll
       });
 
       // Update student's personalId in public and private profiles
-      batch.update(doc(db, "users_public", user.id), { personalId: invitation.personalId });
-      batch.update(doc(db, "users_private", user.id), { personalId: invitation.personalId });
+      batch.set(doc(db, "users_public", user.id), { personalId: invitation.personalId }, { merge: true });
+      batch.set(doc(db, "users_private", user.id), { personalId: invitation.personalId }, { merge: true });
       
       await batch.commit().catch(err => {
         handleFirestoreError(err, OperationType.WRITE, "acceptInvitation batch");
@@ -3251,38 +3251,39 @@ function ClientDashboard({ onViewAllWorkouts, onViewSubscriptions }: { onViewAll
 
   const fetchPersonals = async () => {
     if (!user) return;
-    const q = query(collection(db, "connections"), where("studentId", "==", user.id));
-    const querySnapshot = await getDocs(q);
-    
-    const personalPromises = querySnapshot.docs.map(async (connectionDoc) => {
-      const data = connectionDoc.data();
-      try {
-        const personalDoc = await getDoc(doc(db, "users_public", data.personalId));
-        const publicData = personalDoc.exists() ? personalDoc.data() : {};
-        let privateData = {};
+    console.log("Fetching personals for student:", user.id);
+    try {
+      const q = query(collection(db, "connections"), where("studentId", "==", user.id));
+      const querySnapshot = await getDocs(q);
+      console.log(`Found ${querySnapshot.size} connections for student ${user.id}`);
+      
+      const personalPromises = querySnapshot.docs.map(async (connectionDoc) => {
+        const data = connectionDoc.data();
         try {
-          const privateDoc = await getDoc(doc(db, "users_private", data.personalId));
-          if (privateDoc.exists()) {
-            privateData = privateDoc.data();
+          const personalDoc = await getDoc(doc(db, "users_public", data.personalId));
+          if (!personalDoc.exists()) {
+            console.warn(`Personal document ${data.personalId} not found in users_public`);
+            return null;
           }
+          const publicData = personalDoc.data();
+          
+          return { 
+            id: personalDoc.id, 
+            ...publicData, 
+            status: data.status 
+          };
         } catch (e) {
-          console.warn(`Could not fetch private data for personal ${data.personalId}:`, e);
+          console.error(`Error fetching data for personal ${data.personalId}:`, e);
+          return null;
         }
-
-        return { 
-          id: personalDoc.id, 
-          ...publicData, 
-          ...privateData,
-          status: data.status 
-        };
-      } catch (e) {
-        console.error(`Error fetching data for personal ${data.personalId}:`, e);
-        return null;
-      }
-    });
-    
-    const personalsData = (await Promise.all(personalPromises)).filter(p => p !== null);
-    setPersonals(personalsData);
+      });
+      
+      const personalsData = (await Promise.all(personalPromises)).filter(p => p !== null);
+      setPersonals(personalsData);
+    } catch (err) {
+      console.error("Error in fetchPersonals:", err);
+      handleFirestoreError(err, OperationType.LIST, "connections");
+    }
   };
 
   const isBlocked = personals.some(p => p.status === "blocked");
@@ -3649,6 +3650,7 @@ function CompleteProfile({ isEditing = false, userOverride = null, onComplete = 
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
+    console.log("CompleteProfile: Submitting profile...", { id: user.id, role: user.role });
     setIsSubmitting(true);
     setError("");
 
@@ -3674,10 +3676,14 @@ function CompleteProfile({ isEditing = false, userOverride = null, onComplete = 
         medications: anamnesis.medications || ""
       };
 
+      console.log("CompleteProfile: Data prepared:", { publicData, privateData });
+
       const batch = writeBatch(db);
-      batch.update(doc(db, "users_public", user.id), publicData);
-      batch.update(doc(db, "users_private", user.id), privateData);
+      batch.set(doc(db, "users_public", user.id), publicData, { merge: true });
+      batch.set(doc(db, "users_private", user.id), privateData, { merge: true });
       await batch.commit();
+      
+      console.log("CompleteProfile: Batch committed successfully.");
       
       if (!userOverride) {
         updateUser({ ...publicData, ...privateData });
@@ -3688,7 +3694,7 @@ function CompleteProfile({ isEditing = false, userOverride = null, onComplete = 
       } else if (isEditing) {
         alert("Perfil atualizado com sucesso!");
       } else {
-        // Redirecionar para a tela inicial após concluir o cadastro inicial
+        console.log("CompleteProfile: Redirecting to home...");
         window.location.href = "/";
       }
     } catch (err: any) {
@@ -3987,6 +3993,19 @@ function CompleteProfile({ isEditing = false, userOverride = null, onComplete = 
         <h2 className="text-3xl font-bold text-white text-center mb-2">Complete seu Cadastro</h2>
         <p className="text-neutral-400 text-center mb-8">Precisamos de mais algumas informações para continuar.</p>
         {formContent}
+        <div className="mt-8 pt-6 border-t border-white/5 text-center">
+          <button 
+            onClick={() => {
+              if (window.confirm("Deseja realmente sair?")) {
+                signOut(auth);
+                window.location.href = "/login";
+              }
+            }}
+            className="text-neutral-500 hover:text-white text-sm transition-colors"
+          >
+            Sair da Conta
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -4406,7 +4425,7 @@ function SuperAdminDashboard() {
 
   const updateUserRole = async (userId: string, newRole: "personal" | "student") => {
     try {
-      await updateDoc(doc(db, "users_public", userId), { role: newRole });
+      await setDoc(doc(db, "users_public", userId), { role: newRole }, { merge: true });
       setUsers(prev => prev.map(u => u.id === userId ? { ...u, role: newRole } : u));
       alert("Role atualizada com sucesso!");
     } catch (error) {
@@ -4417,7 +4436,7 @@ function SuperAdminDashboard() {
 
   const toggleBlockUser = async (userId: string, currentStatus: boolean) => {
     try {
-      await updateDoc(doc(db, "users_public", userId), { blocked: !currentStatus });
+      await setDoc(doc(db, "users_public", userId), { blocked: !currentStatus }, { merge: true });
       setUsers(prev => prev.map(u => u.id === userId ? { ...u, blocked: !currentStatus } : u));
       alert(currentStatus ? "Usuário desbloqueado!" : "Usuário bloqueado!");
     } catch (error) {
@@ -5374,16 +5393,17 @@ function Dashboard() {
 
         // 1. Fetch all related documents to delete
         // We delete connections, workouts, assessments, and invitations to ensure no orphans
+        console.log("Fetching related documents...");
         const [connSnap, connSnap2, workSnap, workSnap2, asseSnap, asseSnap2, invSnap, invSnap2, invSnap3] = await Promise.all([
-          getDocs(query(collection(db, "connections"), where("studentId", "==", uid))),
-          getDocs(query(collection(db, "connections"), where("personalId", "==", uid))),
-          getDocs(query(collection(db, "workouts"), where("studentId", "==", uid))),
-          getDocs(query(collection(db, "workouts"), where("personalId", "==", uid))),
-          getDocs(query(collection(db, "assessments"), where("studentId", "==", uid))),
-          getDocs(query(collection(db, "assessments"), where("personalId", "==", uid))),
-          getDocs(query(collection(db, "invitations"), where("studentId", "==", uid))),
-          getDocs(query(collection(db, "invitations"), where("personalId", "==", uid))),
-          getDocs(query(collection(db, "invitations"), where("studentEmail", "==", email || "")))
+          getDocs(query(collection(db, "connections"), where("studentId", "==", uid))).catch(e => { console.error("Error fetching connections (studentId):", e); throw e; }),
+          getDocs(query(collection(db, "connections"), where("personalId", "==", uid))).catch(e => { console.error("Error fetching connections (personalId):", e); throw e; }),
+          getDocs(query(collection(db, "workouts"), where("studentId", "==", uid))).catch(e => { console.error("Error fetching workouts (studentId):", e); throw e; }),
+          getDocs(query(collection(db, "workouts"), where("personalId", "==", uid))).catch(e => { console.error("Error fetching workouts (personalId):", e); throw e; }),
+          getDocs(query(collection(db, "assessments"), where("studentId", "==", uid))).catch(e => { console.error("Error fetching assessments (studentId):", e); throw e; }),
+          getDocs(query(collection(db, "assessments"), where("personalId", "==", uid))).catch(e => { console.error("Error fetching assessments (personalId):", e); throw e; }),
+          getDocs(query(collection(db, "invitations"), where("studentId", "==", uid))).catch(e => { console.error("Error fetching invitations (studentId):", e); throw e; }),
+          getDocs(query(collection(db, "invitations"), where("personalId", "==", uid))).catch(e => { console.error("Error fetching invitations (personalId):", e); throw e; }),
+          getDocs(query(collection(db, "invitations"), where("studentEmail", "==", email || ""))).catch(e => { console.error("Error fetching invitations (studentEmail):", e); throw e; })
         ]);
 
         console.log(`Found documents to delete: 
@@ -5394,25 +5414,66 @@ function Dashboard() {
 
         // 2. Prepare batch deletion
         const batch = writeBatch(db);
-        
-        // Delete profile documents
-        batch.delete(doc(db, "users_public", uid));
-        batch.delete(doc(db, "users_private", uid));
-        
-        if (email) {
-          batch.delete(doc(db, "user_emails", email));
+        const deletedPaths = new Set<string>();
+
+        // Check if profile documents exist before deleting to avoid permission errors on non-existent docs
+        const [publicDoc, privateDoc] = await Promise.all([
+          getDoc(doc(db, "users_public", uid)).catch(() => null),
+          getDoc(doc(db, "users_private", uid)).catch(() => null)
+        ]);
+
+        if (publicDoc && publicDoc.exists()) {
+          batch.delete(doc(db, "users_public", uid));
+          deletedPaths.add(`users_public/${uid}`);
         }
 
-        // Add all fetched documents to batch
-        const allSnaps = [connSnap, connSnap2, workSnap, workSnap2, asseSnap, asseSnap2, invSnap, invSnap2, invSnap3];
-        allSnaps.forEach(snap => {
-          snap.docs.forEach(d => batch.delete(d.ref));
+        if (privateDoc && privateDoc.exists()) {
+          batch.delete(doc(db, "users_private", uid));
+          deletedPaths.add(`users_private/${uid}`);
+        }
+        
+        if (email) {
+          const emailDoc = await getDoc(doc(db, "user_emails", email)).catch(() => null);
+          if (emailDoc && emailDoc.exists()) {
+            batch.delete(doc(db, "user_emails", email));
+            deletedPaths.add(`user_emails/${email}`);
+          }
+        }
+
+        // Register account cleanup/exit log - Use setDoc to ensure UID is used as ID
+        const cleanupRef = doc(db, "account_cleanup", uid);
+        batch.set(cleanupRef, {
+          uid,
+          email,
+          deletedAt: serverTimestamp(),
+          reason: "User requested account deletion"
         });
+
+        // Add all fetched documents to batch, avoiding duplicates and checking existence
+        const allSnaps = [connSnap, connSnap2, workSnap, workSnap2, asseSnap, asseSnap2, invSnap, invSnap2, invSnap3];
+        for (const snap of allSnaps) {
+          for (const d of snap.docs) {
+            if (!deletedPaths.has(d.ref.path)) {
+              // Double-check existence to prevent batch failure
+              try {
+                const docSnap = await getDoc(d.ref);
+                if (docSnap.exists()) {
+                  batch.delete(d.ref);
+                  deletedPaths.add(d.ref.path);
+                }
+              } catch (e) {
+                console.info(`Documento ${d.ref.path} já não existe ou inacessível.`);
+              }
+            }
+          }
+        }
 
         // 3. Commit Firestore changes
         await batch.commit().catch(err => {
           console.error("Firestore batch commit failed:", err);
-          handleFirestoreError(err, OperationType.WRITE, "account_cleanup");
+          // If it's a batch error, we don't know exactly which path failed, 
+          // but we can report the primary path we were working on
+          handleFirestoreError(err, OperationType.WRITE, `account_cleanup/${uid}`);
         });
         
         console.log("Firestore data deleted successfully");
@@ -5493,6 +5554,12 @@ function Dashboard() {
   if (!user && !auth.currentUser) {
     return <Navigate to="/login" />;
   }
+
+  console.log("App: User profile status:", { 
+    id: user.id, 
+    profileCompleted: user.profileCompleted, 
+    isPendingProfile: user.isPendingProfile 
+  });
 
   if (!user.profileCompleted) {
     return <CompleteProfile />;

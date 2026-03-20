@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from "react";
 import { onAuthStateChanged, signOut } from "firebase/auth";
-import { doc, onSnapshot, updateDoc, getDocFromServer } from "firebase/firestore";
+import { doc, onSnapshot, setDoc, getDocFromServer } from "firebase/firestore";
 import { auth, db } from "../firebase";
 import { handleFirestoreError, OperationType } from "../utils/firestoreErrors";
 
@@ -17,6 +17,7 @@ export type UserType = {
   medications?: string;
   profileCompleted?: boolean;
   blocked?: boolean;
+  isPendingProfile?: boolean;
   [key: string]: any;
 };
 
@@ -97,7 +98,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             // Sync phone to public profile if missing there but present in private
             if (privateData?.phone && !publicData?.phone) {
               console.log("AuthProvider: Sincronizando telefone para perfil público...");
-              updateDoc(publicDocRef, { phone: privateData.phone }).catch(e => {
+              setDoc(publicDocRef, { phone: privateData.phone }, { merge: true }).catch(e => {
                 console.error("Erro ao sincronizar telefone:", e);
               });
             }
@@ -113,12 +114,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             publicData = docSnap.data();
             updateCombinedUser();
           } else {
-            console.warn("AuthProvider: Perfil público não encontrado.");
+            console.info("AuthProvider: Perfil público ainda não criado. Definindo usuário mínimo.");
+            // Lógica de 'Usuário Mínimo': UID e Email disponíveis mesmo sem perfil
+            setUser({ 
+              id: firebaseUser.uid, 
+              email: firebaseUser.email || "", 
+              name: firebaseUser.displayName || "Usuário",
+              role: "student", 
+              profileCompleted: false,
+              isPendingProfile: true 
+            } as UserType);
             setLoading(false);
           }
         }, (error) => {
           console.error("Error fetching public profile:", error);
-          handleFirestoreError(error, OperationType.GET, `users_public/${firebaseUser.uid}`);
+          // Mesmo com erro de permissão (ex: regras bloqueando), tentamos manter o usuário mínimo
+          setUser({ 
+            id: firebaseUser.uid, 
+            email: firebaseUser.email || "", 
+            isPendingProfile: true 
+          } as any);
           setLoading(false);
         });
 
@@ -127,12 +142,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             privateData = docSnap.data();
             updateCombinedUser();
           } else {
-            console.warn("AuthProvider: Perfil privado não encontrado.");
+            console.info("AuthProvider: Perfil privado não encontrado.");
             privateData = {}; 
             updateCombinedUser();
           }
         }, (error) => {
-          console.error("Error fetching private profile:", error);
+          console.warn("AuthProvider: Erro ao ler perfil privado (esperado se não existir):", error.message);
           privateData = {};
           updateCombinedUser();
         });
