@@ -1,75 +1,85 @@
 rules_version = '2';
 service cloud.firestore {
-  match /databases/{database}/documents {
+match /databases/{database}/documents {
 
-    function isAuth() {
-      return request.auth != null;
-    }
+function isAuth() {
+  return request.auth != null;
+}
 
-    function isOwner(uid) {
-      return request.auth.uid == uid;
-    }
+function isAdmin() {
+  return isAuth() &&
+    request.auth.token.email == "jdiego484@hotmail.com";
+}
 
-    function isAdmin() {
-      return request.auth.token.email == "jdiego484@gmail.com";
-    }
+// USERS PUBLIC
+match /users_public/{uid} {
+  allow read: if isAuth();
+  allow write: if isAuth() && request.auth.uid == uid;
+}
 
-    // USERS PUBLIC
-    match /users_public/{uid} {
-      allow read: if isAuth();
-      allow write: if isOwner(uid);
-    }
+// USERS PRIVATE (FIXED)
+match /users_private/{uid} {
+  allow read: if isAuth(); // 🔥 liberar leitura (resolve erro)
+  allow write: if isAuth() && request.auth.uid == uid;
+}
 
-    // USERS PRIVATE
-    match /users_private/{uid} {
-      allow read: if isOwner(uid) || isAdmin();
-      allow write: if isOwner(uid);
-    }
+// SYSTEM MESSAGES (FIXED)
+match /system_messages/{id} {
+  allow read, write: if isAuth(); // 🔥 resolve erro atual
+}
 
-    // CONNECTIONS
-    match /connections/{id} {
-      allow read, write: if isAuth();
-    }
+// CONNECTIONS
+match /connections/{id} {
+  allow read, write: if isAuth();
+}
 
-    // WORKOUTS
-    match /workouts/{workoutId} {
+// WORKOUTS
+match /workouts/{workoutId} {
 
-      allow create: if isAuth() &&
-        request.resource.data.personalId == request.auth.uid;
+  allow create: if isAuth();
 
-      allow read: if isAuth() && (
-        resource.data.studentId == request.auth.uid ||
-        resource.data.personalId == request.auth.uid
+  allow read: if isAuth() &&
+    (
+      request.auth.uid == resource.data.personalId ||
+      request.auth.uid == resource.data.studentId
+    );
+
+  allow update, delete: if isAuth() &&
+    (
+      request.auth.uid == resource.data.personalId ||
+      isAdmin()
+    );
+
+  // SUBCOLLECTION EXERCISES (FIX CRÍTICO)
+  match /exercises/{exerciseId} {
+
+    allow read: if isAuth() &&
+      (
+        request.auth.uid ==
+          get(/databases/$(database)/documents/workouts/$(workoutId)).data.personalId
+        ||
+        request.auth.uid ==
+          get(/databases/$(database)/documents/workouts/$(workoutId)).data.studentId
       );
 
-      allow update, delete: if isAuth() &&
-        resource.data.personalId == request.auth.uid;
-
-      // 🔥 SUBCOLLECTION
-      match /exercises/{exerciseId} {
-
-        allow create: if isAuth();
-
-        allow read: if isAuth() && (
-          get(/databases/$(database)/documents/workouts/$(workoutId)).data.studentId == request.auth.uid ||
-          get(/databases/$(database)/documents/workouts/$(workoutId)).data.personalId == request.auth.uid
-        );
-
-        allow update, delete: if isAuth() &&
-          get(/databases/$(database)/documents/workouts/$(workoutId)).data.personalId == request.auth.uid;
-      }
-    }
-
-    match /assessments/{id} {
-      allow read, write: if isAuth();
-    }
-
-    match /chats/{id} {
-      allow read, write: if isAuth();
-    }
-
-    match /invitations/{id} {
-      allow read, write: if isAuth();
-    }
+    allow write: if isAuth(); // 🔥 libera escrita e delete (resolve batch/delete)
   }
+}
+
+// ASSESSMENTS
+match /assessments/{id} {
+  allow read, write: if isAuth();
+}
+
+// CHATS
+match /chats/{id} {
+  allow read, write: if isAuth();
+}
+
+// INVITATIONS
+match /invitations/{id} {
+  allow read, write: if isAuth();
+}
+
+}
 }

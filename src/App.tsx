@@ -579,25 +579,48 @@ function WorkoutBuilder({ client, onBack, existingWorkout, personalOverrideId }:
   }, [client.id]);
 
   const fetchPastWorkouts = async () => {
-    if (!personalId) return;
+    if (!client?.id) return;
+
     try {
       const q = query(
         collection(db, "workouts"),
-        where("studentId", "==", client.id),
-        where("personalId", "==", personalId)
+        where("studentId", "==", client.id)
       );
+
       const querySnapshot = await getDocs(q);
-      const workoutsData = await Promise.all(querySnapshot.docs.map(async (workoutDoc) => {
-        const data = workoutDoc.data();
-        const exercisesQ = query(collection(db, "workouts", workoutDoc.id, "exercises"), orderBy("order", "asc"));
-        const exercisesSnapshot = await getDocs(exercisesQ);
-        const exercises = exercisesSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        return { id: workoutDoc.id, ...data, exercises };
-      }));
-      workoutsData.sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+      const workoutsData = await Promise.all(
+        querySnapshot.docs.map(async (workoutDoc) => {
+          const data = workoutDoc.data();
+
+          const exercisesQ = query(
+            collection(db, "workouts", workoutDoc.id, "exercises"),
+            orderBy("order", "asc")
+          );
+
+          const exercisesSnapshot = await getDocs(exercisesQ);
+
+          const exercises = exercisesSnapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data()
+          }));
+
+          return {
+            id: workoutDoc.id,
+            ...data,
+            exercises
+          };
+        })
+      );
+
+      workoutsData.sort(
+        (a: any, b: any) =>
+          new Date(b.date).getTime() - new Date(a.date).getTime()
+      );
+
       setPastWorkouts(workoutsData);
     } catch (error) {
-      console.error("Error fetching past workouts:", error);
+      console.error("Erro ao buscar treinos:", error);
     }
   };
 
@@ -726,15 +749,6 @@ function WorkoutBuilder({ client, onBack, existingWorkout, personalOverrideId }:
         throw new Error("Data de treino inválida. Por favor, selecione uma data válida.");
       }
       
-      const workoutData = {
-        personalId: personalId,
-        studentId: client.id,
-        date: dateObj.toISOString(),
-        status: existingWorkout?.status || "active",
-        createdAt: existingWorkout?.createdAt || new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      };
-
       const batch = writeBatch(db);
       const workoutRef = existingWorkout?.id 
         ? doc(db, "workouts", existingWorkout.id)
@@ -742,15 +756,30 @@ function WorkoutBuilder({ client, onBack, existingWorkout, personalOverrideId }:
 
       const workoutId = workoutRef.id;
 
-      batch.set(workoutRef, {
-        ...workoutData,
-        personalId: personalId,
+      // If updating, delete old exercises first to avoid duplicates/orphans
+      if (existingWorkout?.id) {
+        try {
+          const oldExQuery = query(collection(db, "workouts", existingWorkout.id, "exercises"));
+          const oldExSnapshot = await getDocs(oldExQuery);
+          oldExSnapshot.docs.forEach(exDoc => {
+            batch.delete(exDoc.ref);
+          });
+        } catch (e) {
+          console.warn("Could not fetch old exercises for deletion, continuing...", e);
+        }
+      }
+
+      const workoutData = {
+        personalId: user?.id,
         studentId: client.id,
         date: dateObj.toISOString(),
         status: existingWorkout?.status || "active",
         createdAt: existingWorkout?.createdAt || new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      }, { merge: true });
+        updatedAt: new Date().toISOString(),
+        exerciseCount: exercises.length
+      };
+
+      batch.set(workoutRef, workoutData, { merge: true });
 
       // 🔥 NEW: use subcollection
       exercises.forEach((ex, index) => {
@@ -762,7 +791,7 @@ function WorkoutBuilder({ client, onBack, existingWorkout, personalOverrideId }:
         batch.set(exRef, {
           ...exData,
           order: index,
-          createdAt: new Date().toISOString()
+          updatedAt: new Date().toISOString()
         });
       });
 
@@ -776,6 +805,16 @@ function WorkoutBuilder({ client, onBack, existingWorkout, personalOverrideId }:
       onBack();
     } catch (err: any) {
       console.error("Error saving workout:", err);
+      console.log("Debug Info:", {
+        userId: user?.id,
+        clientId: client?.id,
+        workoutData: {
+          personalId: user?.id,
+          studentId: client?.id,
+          date: workoutDate,
+          exerciseCount: exercises.length
+        }
+      });
       
       let errorMessage = "Verifique sua conexão e permissões.";
       
@@ -1329,28 +1368,35 @@ function WorkoutHistory({ client, onBack }: { client: any, onBack: () => void })
   const [editingWorkout, setEditingWorkout] = useState<any>(null);
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
 
-  useEffect(() => {
-    fetchWorkouts();
-  }, [client.id]);
+  const [showClearAllConfirm, setShowClearAllConfirm] = useState(false);
+  const [isClearingAll, setIsClearingAll] = useState(false);
 
-  const fetchWorkouts = async () => {
-    if (!user) return;
+  useEffect(() => {
+    if (!user || !client.id) return;
     setLoading(true);
-    try {
-      const q = query(
-        collection(db, "workouts"), 
-        where("studentId", "==", client.id),
-        where("personalId", "==", user.id)
-      );
-      const querySnapshot = await getDocs(q);
-      const workoutsData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    
+    const q = query(
+      collection(db, "workouts"), 
+      where("studentId", "==", client.id),
+      where("personalId", "==", user.id)
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const workoutsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       workoutsData.sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
       setWorkouts(workoutsData);
-    } catch (error) {
-      console.error("Error fetching workouts:", error);
-    } finally {
       setLoading(false);
-    }
+    }, (err) => {
+      console.error("Error fetching workouts history:", err);
+      handleFirestoreError(err, OperationType.LIST, "workouts");
+      setLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, [client.id, user?.id]);
+
+  const fetchWorkouts = () => {
+    // This is now handled by onSnapshot
   };
 
   const deleteWorkout = async (id: string) => {
@@ -1406,19 +1452,57 @@ function WorkoutHistory({ client, onBack }: { client: any, onBack: () => void })
 
   const clearAllHistory = async () => {
     if (workouts.length === 0) return;
-    if (!window.confirm(`ATENÇÃO: Você está prestes a excluir TODOS os ${workouts.length} treinos deste aluno. Esta ação não pode ser desfeita. Deseja continuar?`)) return;
     
-    setLoading(true);
+    setIsClearingAll(true);
     try {
-      const deletePromises = workouts.map(w => deleteDoc(doc(db, "workouts", w.id)));
-      await Promise.all(deletePromises);
+      console.log("WorkoutHistory: Clearing all history for student:", client.id);
+      
+      // We need to delete each workout and its subcollections
+      // Firestore doesn't support recursive delete in client SDK, so we do it manually
+      for (const w of workouts) {
+        const batch = writeBatch(db);
+        
+        // Delete exercises subcollection
+        const exercisesQ = query(collection(db, "workouts", w.id, "exercises"));
+        const exercisesSnapshot = await getDocs(exercisesQ).catch(err => {
+          handleFirestoreError(err, OperationType.LIST, `workouts/${w.id}/exercises`);
+          throw err;
+        });
+        
+        exercisesSnapshot.docs.forEach(exDoc => {
+          batch.delete(exDoc.ref);
+        });
+        
+        // Delete workout document
+        batch.delete(doc(db, "workouts", w.id));
+        
+        await batch.commit().catch(err => {
+          handleFirestoreError(err, OperationType.WRITE, `workouts/${w.id} batch delete`);
+          throw err;
+        });
+      }
+      
       setWorkouts([]);
       alert("Todo o histórico foi removido com sucesso!");
     } catch (error: any) {
       console.error("Error clearing history:", error);
-      alert("Erro ao limpar histórico: " + (error.message || "Verifique suas permissões."));
+      
+      let errorMessage = "Verifique suas permissões.";
+      try {
+        if (error.message && error.message.startsWith('{')) {
+          const errInfo = JSON.parse(error.message);
+          errorMessage = `Erro no Firestore (${errInfo.operationType} em ${errInfo.path}): ${errInfo.error}`;
+        } else if (error.message) {
+          errorMessage = error.message;
+        }
+      } catch (e) {
+        if (error.message) errorMessage = error.message;
+      }
+      
+      alert(`Erro ao limpar histórico: ${errorMessage}`);
     } finally {
-      setLoading(false);
+      setIsClearingAll(false);
+      setShowClearAllConfirm(false);
     }
   };
 
@@ -1477,7 +1561,7 @@ function WorkoutHistory({ client, onBack }: { client: any, onBack: () => void })
           </div>
           {workouts.length > 0 && (
             <button 
-              onClick={clearAllHistory}
+              onClick={() => setShowClearAllConfirm(true)}
               className="flex items-center justify-center gap-2 px-4 py-2 bg-red-500/10 hover:bg-red-500 text-red-500 hover:text-white border border-red-500/20 rounded-xl transition-all text-sm font-medium"
             >
               <Trash2 className="w-4 h-4" /> Limpar Todo o Histórico
@@ -1485,6 +1569,43 @@ function WorkoutHistory({ client, onBack }: { client: any, onBack: () => void })
           )}
         </div>
       </div>
+
+      {/* Custom Confirmation Modal for Clearing All History */}
+      {showClearAllConfirm && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+          <div className="bg-neutral-900 border border-white/10 rounded-2xl p-6 max-w-sm w-full space-y-6">
+            <div className="text-center">
+              <div className="w-16 h-16 bg-red-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
+                <Trash2 className="w-8 h-8 text-red-500" />
+              </div>
+              <h3 className="text-xl font-bold text-white">Limpar Todo o Histórico?</h3>
+              <p className="text-neutral-400 mt-2">
+                ATENÇÃO: Você está prestes a excluir TODOS os {workouts.length} treinos deste aluno. Esta ação não pode ser desfeita.
+              </p>
+            </div>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowClearAllConfirm(false)}
+                className="flex-1 px-4 py-3 bg-neutral-800 hover:bg-neutral-700 text-white rounded-xl font-bold transition-colors"
+                disabled={isClearingAll}
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={clearAllHistory}
+                className="flex-1 px-4 py-3 bg-red-600 hover:bg-red-700 text-white rounded-xl font-bold transition-colors flex items-center justify-center gap-2"
+                disabled={isClearingAll}
+              >
+                {isClearingAll ? (
+                  <div className="w-5 h-5 border-2 border-white/20 border-t-white rounded-full animate-spin"></div>
+                ) : (
+                  "Limpar Tudo"
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {loading ? (
         <div className="flex justify-center py-12">
@@ -1519,7 +1640,7 @@ function WorkoutHistory({ client, onBack }: { client: any, onBack: () => void })
                           Treino de {new Date(selectedDateWorkout.date).toLocaleDateString('pt-BR')}
                         </h3>
                         <p className="text-sm text-neutral-400">
-                          {selectedDateWorkout.exercises.length} exercícios • Status: {selectedDateWorkout.status === 'active' ? (
+                          {selectedDateWorkout.exerciseCount || selectedDateWorkout.exercises?.length || 0} exercícios • Status: {selectedDateWorkout.status === 'active' ? (
                             <span className="text-blue-400">Ativo</span>
                           ) : (
                             <span className="text-emerald-400 flex items-center gap-1 inline-flex">
@@ -2262,26 +2383,50 @@ function ClientWorkoutView({ workout, onBack, isPersonal: isPersonalProp }: { wo
   const [timeLeft, setTimeLeft] = useState(0);
   const [exercises, setExercises] = useState<any[]>(workout.exercises || []);
   const [loadingExercises, setLoadingExercises] = useState(!workout.exercises);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   useEffect(() => {
-    if (!workout.exercises) {
+    console.log("ClientWorkoutView: workout.id =", workout.id, "workout.exercises =", workout.exercises);
+    if (!workout.exercises || workout.exercises.length === 0) {
       const fetchExercises = async () => {
+        if (!workout.id) {
+          console.error("ClientWorkoutView: workout.id is missing!");
+          return;
+        }
+        
+        setLoadingExercises(true);
         try {
-          const q = query(collection(db, "workouts", workout.id, "exercises"));
-          const snapshot = await getDocs(q);
-          const exData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-          // Sort manually if order field exists
-          exData.sort((a: any, b: any) => (a.order || 0) - (b.order || 0));
+          console.log("ClientWorkoutView: Fetching exercises for workout", workout.id);
+          const q = query(
+            collection(db, "workouts", workout.id, "exercises"),
+            orderBy("order", "asc")
+          );
+          
+          const snapshot = await getDocs(q).catch(err => {
+            console.error("ClientWorkoutView: getDocs failed:", err);
+            handleFirestoreError(err, OperationType.LIST, `workouts/${workout.id}/exercises`);
+            throw err;
+          });
+          
+          const exData = snapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data()
+          }));
+          console.log("ClientWorkoutView: Fetched", exData.length, "exercises", exData);
           setExercises(exData);
-        } catch (err) {
+        } catch (err: any) {
           console.error("Error fetching exercises:", err);
         } finally {
           setLoadingExercises(false);
         }
       };
       fetchExercises();
+    } else {
+      setExercises(workout.exercises);
+      setLoadingExercises(false);
     }
-  }, [workout.id]);
+  }, [workout.id, workout.exercises]);
   const [completedExercises, setCompletedExercises] = useState<string[]>(() => {
     const saved = localStorage.getItem(storageKey);
     if (saved && workout.status !== 'completed') {
@@ -2327,6 +2472,7 @@ function ClientWorkoutView({ workout, onBack, isPersonal: isPersonalProp }: { wo
   });
 
   const [isFinishing, setIsFinishing] = useState(false);
+  const [showFinishConfirm, setShowFinishConfirm] = useState(false);
   const [recipientName, setRecipientName] = useState("Carregando...");
   const [isEditing, setIsEditing] = useState(false);
   
@@ -2408,13 +2554,11 @@ function ClientWorkoutView({ workout, onBack, isPersonal: isPersonalProp }: { wo
   }, [isPersonal, workout.studentId, workout.personalId]);
 
   const deleteWorkout = async () => {
-    console.log("ClientWorkoutView: Deleting workout:", workout.id);
-    if (!window.confirm("CONFIRMAR EXCLUSÃO: Tem certeza que deseja excluir este treino permanentemente?")) {
-      console.log("ClientWorkoutView: Deletion cancelled by user");
-      return;
-    }
+    if (!isPersonal) return;
     
+    setIsDeleting(true);
     try {
+      console.log("ClientWorkoutView: Deleting workout:", workout.id);
       const batch = writeBatch(db);
       
       // Delete workout document
@@ -2456,6 +2600,9 @@ function ClientWorkoutView({ workout, onBack, isPersonal: isPersonalProp }: { wo
       }
       
       alert(`Erro ao excluir treino: ${errorMessage}`);
+    } finally {
+      setIsDeleting(false);
+      setShowDeleteConfirm(false);
     }
   };
 
@@ -2499,12 +2646,15 @@ function ClientWorkoutView({ workout, onBack, isPersonal: isPersonalProp }: { wo
     setExerciseFeedback(prev => ({ ...prev, [exerciseId]: feedback }));
   };
 
-  const finishWorkout = async () => {
+  const finishWorkout = async (force: boolean = false) => {
     console.log("ClientWorkoutView: finishWorkout called", { 
       workoutId: workout.id, 
       isPersonal, 
       isCompleted,
-      completedExercisesCount: completedExercises.length 
+      completedExercisesCount: completedExercises.length,
+      force,
+      studentIdInDoc: workout.studentId,
+      currentUserId: user?.id
     });
 
     if (isPersonal || isCompleted) {
@@ -2512,14 +2662,14 @@ function ClientWorkoutView({ workout, onBack, isPersonal: isPersonalProp }: { wo
       return;
     }
 
-    if (completedExercises.length === 0) {
-      if (!window.confirm("Você não marcou nenhum exercício como concluído. Deseja finalizar assim mesmo?")) {
-        console.log("ClientWorkoutView: finishWorkout cancelled by user (no exercises completed)");
-        return;
-      }
+    if (completedExercises.length === 0 && !force) {
+      setShowFinishConfirm(true);
+      return;
     }
 
     setIsFinishing(true);
+    setShowFinishConfirm(false);
+    setFinishError(null);
     try {
       const endTime = Date.now();
       const duration = startTime ? Math.floor((endTime - startTime) / 1000) : 0;
@@ -2539,7 +2689,6 @@ function ClientWorkoutView({ workout, onBack, isPersonal: isPersonalProp }: { wo
       });
       console.log("ClientWorkoutView: Workout update successful");
       localStorage.removeItem(storageKey);
-      alert("Treino finalizado com sucesso! Bom trabalho!");
       onBack();
     } catch (error: any) {
       console.error("ClientWorkoutView: Error finishing workout:", error);
@@ -2556,11 +2705,14 @@ function ClientWorkoutView({ workout, onBack, isPersonal: isPersonalProp }: { wo
         if (error.message) errorMessage = error.message;
       }
       
-      alert(`Erro ao finalizar treino: ${errorMessage}`);
+      // Using a simple state for error instead of alert
+      setFinishError(errorMessage);
     } finally {
       setIsFinishing(false);
     }
   };
+
+  const [finishError, setFinishError] = useState<string | null>(null);
 
   return (
     <div className="space-y-6 pb-24">
@@ -2589,7 +2741,7 @@ function ClientWorkoutView({ workout, onBack, isPersonal: isPersonalProp }: { wo
                 <Edit2 className="w-4 h-4" />
               </button>
               <button 
-                onClick={deleteWorkout}
+                onClick={() => setShowDeleteConfirm(true)}
                 className="p-2 bg-neutral-800 hover:bg-red-600/20 text-red-500 rounded-xl transition-colors border border-white/5"
                 title="Excluir Treino"
               >
@@ -2637,7 +2789,7 @@ function ClientWorkoutView({ workout, onBack, isPersonal: isPersonalProp }: { wo
             </button>
           ) : (
             <button 
-              onClick={finishWorkout}
+              onClick={() => finishWorkout()}
               disabled={isFinishing}
               className="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-500 text-white px-8 py-4 rounded-2xl font-black text-lg shadow-xl shadow-emerald-600/20 transition-all transform active:scale-95 flex items-center justify-center gap-2 disabled:opacity-50"
             >
@@ -2847,15 +2999,51 @@ function ClientWorkoutView({ workout, onBack, isPersonal: isPersonalProp }: { wo
         )}
 
         {!isPersonal && !isCompleted && (
-          <button
-            onClick={finishWorkout}
-            disabled={isFinishing}
-            className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold py-4 rounded-xl transition-all transform active:scale-95 flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/20 mt-8"
-          >
-            {isFinishing ? "Finalizando..." : <><CheckCircle2 className="w-6 h-6" /> Finalizar Treino</>}
-          </button>
+          <div className="space-y-4 mt-8">
+            {finishError && (
+              <div className="bg-red-500/10 border border-red-500/20 p-4 rounded-xl flex items-center gap-3 text-red-400 text-sm">
+                <AlertCircle className="w-5 h-5 shrink-0" />
+                <p>{finishError}</p>
+              </div>
+            )}
+            <button
+              onClick={() => finishWorkout()}
+              disabled={isFinishing}
+              className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold py-4 rounded-xl transition-all transform active:scale-95 flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/20"
+            >
+              {isFinishing ? "Finalizando..." : <><CheckCircle2 className="w-6 h-6" /> Finalizar Treino</>}
+            </button>
+          </div>
         )}
       </div>
+
+      {showFinishConfirm && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+          <div className="bg-neutral-900 w-full max-w-md p-8 rounded-3xl border border-white/10 shadow-2xl text-center">
+            <div className="w-16 h-16 bg-orange-600/20 rounded-full flex items-center justify-center text-orange-500 mx-auto mb-6">
+              <AlertTriangle className="w-8 h-8" />
+            </div>
+            <h3 className="text-xl font-bold text-white mb-2">Finalizar sem exercícios?</h3>
+            <p className="text-neutral-400 text-sm mb-8">
+              Você não marcou nenhum exercício como concluído. Deseja finalizar o treino assim mesmo?
+            </p>
+            <div className="grid grid-cols-2 gap-4">
+              <button 
+                onClick={() => setShowFinishConfirm(false)}
+                className="py-3 rounded-xl bg-neutral-800 text-white font-bold hover:bg-neutral-700 transition-colors"
+              >
+                Cancelar
+              </button>
+              <button 
+                onClick={() => finishWorkout(true)}
+                className="py-3 rounded-xl bg-emerald-600 text-white font-bold hover:bg-emerald-500 transition-colors"
+              >
+                Finalizar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -2951,7 +3139,6 @@ function ClientDashboard({ onViewAllWorkouts, onViewSubscriptions }: { onViewAll
   useEffect(() => {
     if (user) {
       fetchPersonals();
-      fetchWorkouts();
       fetchInvitations();
     }
   }, [user]);
@@ -3013,41 +3200,53 @@ function ClientDashboard({ onViewAllWorkouts, onViewSubscriptions }: { onViewAll
     }
   };
 
-  const fetchWorkouts = async () => {
+  useEffect(() => {
     if (!user) return;
+    
     const q = query(collection(db, "workouts"), where("studentId", "==", user.id));
-    const querySnapshot = await getDocs(q);
-    let workoutsData = querySnapshot.docs.map(doc => ({ id: doc.id, ...(doc.data() as any) }));
-    
-    // Filter out workouts from personals who blocked the client
-    const connectionsQ = query(collection(db, "connections"), where("studentId", "==", user.id), where("status", "==", "blocked"));
-    const connectionsSnapshot = await getDocs(connectionsQ);
-    const blockedPersonalIds = connectionsSnapshot.docs.map(doc => doc.data().personalId);
-    
-    workoutsData = workoutsData.filter(w => !blockedPersonalIds.includes(w.personalId));
+    const unsubscribe = onSnapshot(q, async (snapshot) => {
+      let workoutsData = snapshot.docs.map(doc => ({ id: doc.id, ...(doc.data() as any) }));
+      
+      // Filter out workouts from personals who blocked the client
+      const connectionsQ = query(collection(db, "connections"), where("studentId", "==", user.id), where("status", "==", "blocked"));
+      const connectionsSnapshot = await getDocs(connectionsQ);
+      const blockedPersonalIds = connectionsSnapshot.docs.map(doc => doc.data().personalId);
+      
+      workoutsData = workoutsData.filter(w => !blockedPersonalIds.includes(w.personalId));
 
-    // Sort by date descending
-    workoutsData.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-    const workoutsWithPhone = await Promise.all(workoutsData.map(async (workout) => {
-      try {
-        const personalDoc = await getDoc(doc(db, "users_public", workout.personalId));
-        let phone = personalDoc.exists() ? personalDoc.data().phone : "";
-        
-        if (!phone) {
-          const privateDoc = await getDoc(doc(db, "users_private", workout.personalId));
-          if (privateDoc.exists()) {
-            phone = privateDoc.data().phone;
+      // Sort by date descending
+      workoutsData.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      
+      const workoutsWithPhone = await Promise.all(workoutsData.map(async (workout) => {
+        try {
+          const personalDoc = await getDoc(doc(db, "users_public", workout.personalId));
+          let phone = personalDoc.exists() ? personalDoc.data().phone : "";
+          
+          if (!phone) {
+            const privateDoc = await getDoc(doc(db, "users_private", workout.personalId));
+            if (privateDoc.exists()) {
+              phone = privateDoc.data().phone;
+            }
           }
+          
+          return { ...workout, personalPhone: phone };
+        } catch (e) {
+          console.error("Error fetching personal phone for workout:", e);
+          return workout;
         }
-        
-        return { ...workout, personalPhone: phone };
-      } catch (e) {
-        console.error("Error fetching personal phone for workout:", e);
-        return workout;
-      }
-    }));
+      }));
 
-    setWorkouts(workoutsWithPhone);
+      setWorkouts(workoutsWithPhone);
+    }, (err) => {
+      console.error("Error in workouts snapshot:", err);
+      handleFirestoreError(err, OperationType.LIST, "workouts");
+    });
+
+    return () => unsubscribe();
+  }, [user]);
+
+  const fetchWorkouts = () => {
+    // Handled by onSnapshot
   };
 
   const fetchPersonals = async () => {
@@ -3821,16 +4020,48 @@ function ClientWorkoutsTab({ userOverride = null }: { userOverride?: UserType | 
     setLoading(true);
     try {
       const q = query(collection(db, "workouts"), where("studentId", "==", user.id));
-      const querySnapshot = await getDocs(q);
-      let workoutsData = querySnapshot.docs.map(doc => ({ id: doc.id, ...(doc.data() as any) }));
+      const querySnapshot = await getDocs(q).catch(err => {
+        handleFirestoreError(err, OperationType.LIST, "workouts");
+        throw err;
+      });
+      
+      const workoutsData = await Promise.all(
+        querySnapshot.docs.map(async (workoutDoc) => {
+          const data = workoutDoc.data();
+          
+          // Fetch exercises for each workout
+          const exercisesQ = query(
+            collection(db, "workouts", workoutDoc.id, "exercises"),
+            orderBy("order", "asc")
+          );
+          const exercisesSnapshot = await getDocs(exercisesQ).catch(err => {
+            console.warn(`Could not fetch exercises for workout ${workoutDoc.id}`, err);
+            return { docs: [] } as any;
+          });
+          
+          const exercises = exercisesSnapshot.docs.map((doc: any) => ({
+            id: doc.id,
+            ...doc.data()
+          }));
+          
+          return {
+            id: workoutDoc.id,
+            ...data,
+            exercises
+          } as any;
+        })
+      );
       
       const connectionsQ = query(collection(db, "connections"), where("studentId", "==", user.id), where("status", "==", "blocked"));
-      const connectionsSnapshot = await getDocs(connectionsQ);
+      const connectionsSnapshot = await getDocs(connectionsQ).catch(err => {
+        handleFirestoreError(err, OperationType.LIST, "connections");
+        throw err;
+      });
       const blockedPersonalIds = connectionsSnapshot.docs.map(doc => doc.data().personalId);
       
-      workoutsData = workoutsData.filter(w => !blockedPersonalIds.includes(w.personalId));
-      workoutsData.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-      setWorkouts(workoutsData);
+      let filteredWorkouts = workoutsData.filter(w => !blockedPersonalIds.includes(w.personalId));
+      filteredWorkouts.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      setWorkouts(filteredWorkouts);
     } catch (error) {
       console.error("Error fetching workouts:", error);
     } finally {
@@ -3971,17 +4202,49 @@ function ClientHistoryTab() {
     setLoading(true);
     try {
       const q = query(collection(db, "workouts"), where("studentId", "==", user.id));
-      const querySnapshot = await getDocs(q);
-      let workoutsData = querySnapshot.docs.map(doc => ({ id: doc.id, ...(doc.data() as any) }));
+      const querySnapshot = await getDocs(q).catch(err => {
+        handleFirestoreError(err, OperationType.LIST, "workouts");
+        throw err;
+      });
+      
+      const workoutsData = await Promise.all(
+        querySnapshot.docs.map(async (workoutDoc) => {
+          const data = workoutDoc.data();
+          
+          // Fetch exercises for each workout
+          const exercisesQ = query(
+            collection(db, "workouts", workoutDoc.id, "exercises"),
+            orderBy("order", "asc")
+          );
+          const exercisesSnapshot = await getDocs(exercisesQ).catch(err => {
+            console.warn(`Could not fetch exercises for workout ${workoutDoc.id}`, err);
+            return { docs: [] } as any;
+          });
+          
+          const exercises = exercisesSnapshot.docs.map((doc: any) => ({
+            id: doc.id,
+            ...doc.data()
+          }));
+          
+          return {
+            id: workoutDoc.id,
+            ...data,
+            exercises
+          } as any;
+        })
+      );
       
       // Filter out workouts from personals who blocked the client
       const connectionsQ = query(collection(db, "connections"), where("studentId", "==", user.id), where("status", "==", "blocked"));
-      const connectionsSnapshot = await getDocs(connectionsQ);
+      const connectionsSnapshot = await getDocs(connectionsQ).catch(err => {
+        handleFirestoreError(err, OperationType.LIST, "connections");
+        throw err;
+      });
       const blockedPersonalIds = connectionsSnapshot.docs.map(doc => doc.data().personalId);
       
-      workoutsData = workoutsData.filter(w => !blockedPersonalIds.includes(w.personalId));
-      workoutsData.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-      setWorkouts(workoutsData);
+      const filteredWorkouts = workoutsData.filter(w => !blockedPersonalIds.includes(w.personalId));
+      filteredWorkouts.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      setWorkouts(filteredWorkouts);
     } catch (error) {
       console.error("Error fetching workouts:", error);
     } finally {
