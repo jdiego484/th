@@ -12,7 +12,8 @@
         "personalCode": { "type": "string" },
         "gender": { "type": "string" },
         "crefNumber": { "type": "string" },
-        "personalId": { "type": "string", "description": "ID of the personal trainer connected to this student." }
+        "personalId": { "type": "string", "description": "ID of the personal trainer connected to this student." },
+        "stripeConnected": { "type": "boolean", "description": "Whether the personal trainer has connected their Stripe account." }
       },
       "required": ["name", "role"]
     },
@@ -29,7 +30,8 @@
         "address": { "type": "string" },
         "medicalHistory": { "type": "string" },
         "medications": { "type": "string" },
-        "personalId": { "type": "string", "description": "ID of the personal trainer connected to this student." }
+        "personalId": { "type": "string", "description": "ID of the personal trainer connected to this student." },
+        "stripeAccountId": { "type": "string", "description": "The Stripe Connect account ID for the personal trainer." }
       },
       "required": ["email"]
     },

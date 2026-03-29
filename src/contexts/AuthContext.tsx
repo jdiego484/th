@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from "react";
-import { onAuthStateChanged, signOut } from "firebase/auth";
+import { onAuthStateChanged, signOut, signInWithPopup, GoogleAuthProvider } from "firebase/auth";
 import { doc, onSnapshot, setDoc, getDocFromServer } from "firebase/firestore";
 import { auth, db } from "../firebase";
 import { handleFirestoreError, OperationType } from "../utils/firestoreErrors";
@@ -26,6 +26,7 @@ interface AuthContextType {
   loading: boolean;
   logout: () => void;
   updateUser: (data: Partial<UserType>) => void;
+  loginWithGoogle: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType>({
@@ -33,6 +34,7 @@ const AuthContext = createContext<AuthContextType>({
   loading: true,
   logout: () => {},
   updateUser: () => {},
+  loginWithGoogle: async () => {},
 });
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -69,7 +71,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (unsubPrivate) unsubPrivate();
 
       if (firebaseUser) {
-        console.log("AuthProvider: Autenticado no Firebase Auth:", firebaseUser.uid);
+        console.log("AuthProvider: Autenticado no Firebase Auth:", firebaseUser.uid, "Email:", firebaseUser.email);
         
         const publicDocRef = doc(db, "users_public", firebaseUser.uid);
         const privateDocRef = doc(db, "users_private", firebaseUser.uid);
@@ -88,12 +90,44 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               return;
             }
 
+            const rawRole = (publicData.role || "").toString().toLowerCase().trim();
+            const userEmail = (firebaseUser.email || "").trim().toLowerCase();
+            const isHardcodedAdmin = userEmail === "jdiego484@gmail.com";
+            const isForcedPersonal = userEmail === "jdiego484@hotmail.com";
+            const savedRole = localStorage.getItem('pending_role') as "personal" | "student" | "superadmin" | null;
+            
+            console.log("AuthProvider: Syncing profile for", userEmail);
+            console.log("AuthProvider: Data from Firestore:", publicData);
+            console.log("AuthProvider: Pending role in localStorage:", savedRole);
+
+            let finalRole: "personal" | "student" | "superadmin" = "student";
+            
+            // Ordem de prioridade estrita
+            if (isForcedPersonal) {
+              finalRole = "personal";
+            } else if (isHardcodedAdmin || rawRole === "superadmin") {
+              finalRole = "superadmin";
+            } else if (rawRole === "personal") {
+              finalRole = "personal";
+            } else if (savedRole) {
+              // Se o DB não tem o role ainda, mas temos no localStorage, usamos o localStorage
+              finalRole = savedRole;
+              console.log("AuthProvider: DB missing role, using localStorage fallback:", savedRole);
+            } else {
+              finalRole = "student";
+            }
+
+            console.log("AuthProvider: Final role decided:", finalRole);
+
             const combinedUser: UserType = {
               ...publicData,
               ...(privateData || {}),
               id: firebaseUser.uid,
-              role: publicData.role === "client" ? "student" : publicData.role
+              email: firebaseUser.email || (privateData?.email) || "",
+              role: finalRole
             };
+
+            console.log("AuthProvider: Combined User Object:", combinedUser);
 
             // Sync phone to public profile if missing there but present in private
             if (privateData?.phone && !publicData?.phone) {
@@ -104,6 +138,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             }
 
             setUser(combinedUser);
+            if (combinedUser.profileCompleted && rawRole) {
+              localStorage.removeItem('pending_role');
+            }
             setAuthError(null);
             setLoading(false);
           }
@@ -115,12 +152,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             updateCombinedUser();
           } else {
             console.info("AuthProvider: Perfil público ainda não criado. Definindo usuário mínimo.");
+            const userEmail = (firebaseUser.email || "").trim().toLowerCase();
+            const isHardcodedAdmin = userEmail === "jdiego484@gmail.com";
+            const isForcedPersonal = userEmail === "jdiego484@hotmail.com";
+            
             // Lógica de 'Usuário Mínimo': UID e Email disponíveis mesmo sem perfil
+            // Tenta recuperar o role do localStorage se disponível (setado no Login.tsx) ou assume student
+            const savedRole = localStorage.getItem('pending_role') as "personal" | "student" | "superadmin" | null;
+            
             setUser({ 
               id: firebaseUser.uid, 
               email: firebaseUser.email || "", 
               name: firebaseUser.displayName || "Usuário",
-              role: "student", 
+              role: isHardcodedAdmin ? "superadmin" : (isForcedPersonal ? "personal" : (savedRole || "student")), 
               profileCompleted: false,
               isPendingProfile: true 
             } as UserType);
@@ -173,6 +217,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       console.log("AuthContext: Iniciando logout...");
       // Limpar estado local primeiro para feedback imediato
+      localStorage.removeItem('pending_role');
       setUser(null);
       setLoading(true); // Mostrar loading durante o processo
       
@@ -195,8 +240,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const loginWithGoogle = async () => {
+    const provider = new GoogleAuthProvider();
+    try {
+      await signInWithPopup(auth, provider);
+    } catch (error) {
+      console.error("Erro ao fazer login com Google:", error);
+      throw error;
+    }
+  };
+
   return (
-    <AuthContext.Provider value={{ user, loading, logout, updateUser }}>
+    <AuthContext.Provider value={{ user, loading, logout, updateUser, loginWithGoogle }}>
       {authError && (
         <div className="fixed top-0 left-0 right-0 bg-red-600 text-white p-2 text-center text-xs z-[9999]">
           {authError} - Tente atualizar a página.

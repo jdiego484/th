@@ -1,8 +1,10 @@
 {
-  "apiKey": "AIzaSyAjVCi3TqI3aAL0hZXlU5lb7Z8LVG0CtmA",
-  "authDomain": "aplicativoteste-daa4d.firebaseapp.com",
-  "projectId": "aplicativoteste-daa4d",
-  "storageBucket": "aplicativoteste-daa4d.firebasestorage.app",
-  "messagingSenderId": "217785723644",
-  "appId": "1:217785723644:web:11eeeea2bc8b4291170579"
+  "projectId": "gen-lang-client-0869513739",
+  "appId": "1:360833646654:web:595944867d96c8bf55516f",
+  "apiKey": "AIzaSyDRIKp0OHmogeLdrOWt_HanG_PSpObxfNk",
+  "authDomain": "gen-lang-client-0869513739.firebaseapp.com",
+  "firestoreDatabaseId": "ai-studio-4d6152f8-0a49-408d-b787-ceb0c9481db7",
+  "storageBucket": "gen-lang-client-0869513739.firebasestorage.app",
+  "messagingSenderId": "360833646654",
+  "measurementId": ""
 }

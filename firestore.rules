@@ -13,15 +13,14 @@ service cloud.firestore {
     
     function isAdmin() {
       return isAuth() && (
-        request.auth.token.email == "jdiego484@gmail.com" || 
-        request.auth.token.email == "jdiego484@hotmail.com"
+        request.auth.token.email == "jdiego484@gmail.com" && 
+        request.auth.token.email_verified == true
       );
     }
 
     // account_cleanup - used for logging or tracking deletion process
     match /account_cleanup/{uid} {
-      allow create: if isAuth() && request.auth.uid == uid;
-      allow update, delete: if isAuth() && (request.auth.uid == uid || isAdmin());
+      allow write: if isAuth() && (request.auth.uid == uid || isAdmin());
       allow read: if isAuth() && (request.auth.uid == uid || isAdmin());
     }
 
@@ -29,14 +28,14 @@ service cloud.firestore {
     match /users_public/{uid} {
       allow read: if isAuth();
       allow create, update: if isOwner(uid) || isAdmin();
-      allow delete: if isOwner(uid) || isAdmin() || resource == null;
+      allow delete: if isAuth() && (request.auth.uid == uid || isAdmin());
     }
 
     // USERS PRIVATE
     match /users_private/{uid} {
       allow read: if isOwner(uid) || isAdmin();
       allow create, update: if isOwner(uid) || isAdmin() || resource == null;
-      allow delete: if isOwner(uid) || isAdmin() || resource == null;
+      allow delete: if isAuth() && (request.auth.uid == uid || isAdmin());
     }
     
     // USER EMAILS
@@ -121,7 +120,7 @@ service cloud.firestore {
 
     // SYSTEM MESSAGES
     match /system_messages/{id} {
-      allow read: if isAuth();
+      allow read: if true; // Allow public read for system announcements/banners
       allow write: if isAdmin();
     }
   }

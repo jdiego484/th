@@ -29,6 +29,9 @@ export interface FirestoreErrorInfo {
 }
 
 export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const isPermissionError = error instanceof Error && error.message.includes("insufficient permissions");
+  const isUnauthenticated = !auth.currentUser;
+
   const errInfo: FirestoreErrorInfo = {
     error: error instanceof Error ? error.message : String(error),
     authInfo: {
@@ -47,6 +50,14 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
     operationType,
     path
   }
+
+  // Se for erro de permissão e o usuário não estiver logado, logamos apenas como aviso
+  // Isso evita crashes durante o processo de logout ou carregamento inicial
+  if (isPermissionError && isUnauthenticated) {
+    console.warn('Firestore Auth Transition/Permission Warning: ', JSON.stringify(errInfo));
+    return; // Não lança erro para evitar crash do app
+  }
+
   console.error('Firestore Error: ', JSON.stringify(errInfo));
   throw new Error(JSON.stringify(errInfo));
 }

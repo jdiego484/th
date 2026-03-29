@@ -1,13 +1,14 @@
 import React, { useState, useEffect, useRef, FormEvent, ChangeEvent, ReactNode } from "react";
 import { BrowserRouter, Routes, Route, Navigate, useNavigate } from "react-router-dom";
-import { User, LogOut, Users, Dumbbell, Activity, Search, Plus, ArrowLeft, Clock, Play, Check, Trash2, ChevronLeft, ChevronRight, Calendar as CalendarIcon, AlertTriangle, Image as ImageIcon, Video, Upload, X, Copy, Edit2, MessageCircle, CheckCircle2, XCircle, Circle, GripVertical, Send, CreditCard, FileText, History, RefreshCw, Globe, UserCheck, AlertCircle, Bell } from "lucide-react";
+import { User, LogOut, Users, Dumbbell, Activity, Search, Plus, ArrowLeft, Clock, Play, Check, Trash2, ChevronLeft, ChevronRight, Calendar as CalendarIcon, AlertTriangle, Image as ImageIcon, Video, Upload, X, Copy, Edit2, MessageCircle, CheckCircle2, XCircle, Circle, GripVertical, Send, CreditCard, FileText, History, RefreshCw, Globe, UserCheck, AlertCircle, Bell, Eye, EyeOff } from "lucide-react";
 import { DragDropContext, Droppable, Draggable, DropResult } from "@hello-pangea/dnd";
-import { auth, db } from "./firebase";
+import { auth, db, functions } from "./firebase";
 import { EXERCISES } from "./data/exercises";
 import { AssessmentView } from "./components/AssessmentView";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { handleFirestoreError, OperationType } from "./utils/firestoreErrors";
 import { AuthProvider, useAuth, UserType } from "./contexts/AuthContext";
+import ConfiguracaoBanco from './components/ConfiguracaoBanco';
 import { 
   createUserWithEmailAndPassword, 
   signInWithEmailAndPassword, 
@@ -35,6 +36,7 @@ import {
   collectionGroup,
   getDocFromServer
 } from "firebase/firestore";
+import { httpsCallable } from 'firebase/functions';
 
 const openWhatsApp = (phone?: string) => {
   if (!phone) {
@@ -68,7 +70,8 @@ function Login() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const { user, loading } = useAuth();
+  const [showPassword, setShowPassword] = useState(false);
+  const { user, loading, loginWithGoogle } = useAuth();
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -87,7 +90,7 @@ function Login() {
     setSuccess("");
     setIsSubmitting(true);
     try {
-      await sendPasswordResetEmail(auth, email);
+      await sendPasswordResetEmail(auth, email.trim().toLowerCase());
       setSuccess("E-mail de recuperação enviado! Verifique sua caixa de entrada.");
     } catch (err: any) {
       console.error("Reset password error:", err);
@@ -119,7 +122,7 @@ function Login() {
 
     try {
       if (isLogin) {
-        await signInWithEmailAndPassword(auth, email, password);
+        await signInWithEmailAndPassword(auth, email.trim().toLowerCase(), password);
       } else {
         let foundPersonalId = null;
         
@@ -136,6 +139,9 @@ function Login() {
 
         const userCredential = await createUserWithEmailAndPassword(auth, email.trim().toLowerCase(), password);
         const uid = userCredential.user.uid;
+
+        // Salva o papel pretendido para o AuthContext usar durante a criação do perfil
+        localStorage.setItem('pending_role', role);
 
         let newPersonalCode = "";
         if (role === "personal") {
@@ -191,12 +197,40 @@ function Login() {
       console.error("Auth error details:", err);
       let message = "Ocorreu um erro ao processar sua solicitação.";
       
-      if (err.code === "auth/email-already-in-use") message = "Este e-mail já está em uso.";
-      else if (err.code === "auth/invalid-credential") message = "E-mail ou senha incorretos.";
-      else if (err.code === "auth/weak-password") message = "A senha deve ter pelo menos 6 caracteres.";
-      else if (err.code === "permission-denied") message = "Erro de permissão no banco de dados. Verifique as regras do Firestore.";
-      else if (err.message) message = `Erro: ${err.message}`;
+      if (err.code === "auth/operation-not-allowed") {
+        message = "O login por E-mail/Senha está desativado no Firebase Console. Por favor, use o 'Entrar com Google' ou ative o provedor 'E-mail/Senha' nas configurações de Authentication do seu projeto Firebase.";
+      } else if (err.code === "auth/email-already-in-use") {
+        message = "Este e-mail já está em uso.";
+      } else if (err.code === "auth/invalid-credential") {
+        message = "E-mail ou senha incorretos. Verifique se digitou corretamente ou se usou o 'Entrar com Google'.";
+      } else if (err.code === "auth/weak-password") {
+        message = "A senha deve ter pelo menos 6 caracteres.";
+      } else if (err.code === "auth/invalid-email") {
+        message = "O formato do e-mail é inválido.";
+      } else if (err.code === "permission-denied") {
+        message = "Erro de permissão no banco de dados. Verifique as regras do Firestore.";
+      } else if (err.message) {
+        message = `Erro: ${err.message}`;
+      }
 
+      setError(message);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleGoogleLogin = async () => {
+    setError("");
+    setIsSubmitting(true);
+    try {
+      await loginWithGoogle();
+      navigate("/");
+    } catch (err: any) {
+      console.error("Google Auth error:", err);
+      let message = "Erro ao entrar com Google.";
+      if (err.code === "auth/popup-blocked") {
+        message = "O popup de login foi bloqueado pelo navegador. Por favor, permita popups para este site.";
+      }
       setError(message);
     } finally {
       setIsSubmitting(false);
@@ -318,30 +352,48 @@ function Login() {
           )}
 
           {!isForgotPassword && (
-            <div>
+            <div className="relative">
               <label className="block text-sm font-medium text-neutral-500 dark:text-neutral-400 mb-1">Senha</label>
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full bg-neutral-50 dark:bg-neutral-800 border border-neutral-200 dark:border-white/10 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-orange-600 focus:border-transparent transition-all"
-                placeholder="••••••••"
-                required
-              />
+              <div className="relative">
+                <input
+                  type={showPassword ? "text" : "password"}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="w-full bg-neutral-50 dark:bg-neutral-800 border border-neutral-200 dark:border-white/10 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-orange-600 focus:border-transparent transition-all pr-12"
+                  placeholder="••••••••"
+                  required
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 p-2 text-neutral-500 hover:text-white transition-colors"
+                >
+                  {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                </button>
+              </div>
             </div>
           )}
 
           {!isLogin && !isForgotPassword && (
-            <div>
+            <div className="relative">
               <label className="block text-sm font-medium text-neutral-500 dark:text-neutral-400 mb-1">Confirmar Senha</label>
-              <input
-                type="password"
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                className="w-full bg-neutral-50 dark:bg-neutral-800 border border-neutral-200 dark:border-white/10 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-orange-600 focus:border-transparent transition-all"
-                placeholder="••••••••"
-                required
-              />
+              <div className="relative">
+                <input
+                  type={showPassword ? "text" : "password"}
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  className="w-full bg-neutral-50 dark:bg-neutral-800 border border-neutral-200 dark:border-white/10 rounded-xl px-4 py-3 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-orange-600 focus:border-transparent transition-all pr-12"
+                  placeholder="••••••••"
+                  required
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 p-2 text-neutral-500 hover:text-white transition-colors"
+                >
+                  {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                </button>
+              </div>
             </div>
           )}
 
@@ -396,6 +448,28 @@ function Login() {
             {isSubmitting ? "Por favor, aguarde..." : (isForgotPassword ? "Enviar E-mail de Recuperação" : (isLogin ? "Entrar" : "Criar Conta"))}
           </button>
         </form>
+
+        {isLogin && !isForgotPassword && (
+          <>
+            <div className="relative my-6">
+              <div className="absolute inset-0 flex items-center">
+                <div className="w-full border-t border-white/10"></div>
+              </div>
+              <div className="relative flex justify-center text-xs uppercase">
+                <span className="bg-neutral-900 px-2 text-neutral-500">Ou continue com</span>
+              </div>
+            </div>
+
+            <button
+              onClick={handleGoogleLogin}
+              disabled={isSubmitting}
+              className="w-full bg-white hover:bg-neutral-100 disabled:opacity-50 text-neutral-900 font-bold py-4 rounded-xl transition-all transform active:scale-95 flex items-center justify-center gap-3"
+            >
+              <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-5 h-5" />
+              Entrar com Google
+            </button>
+          </>
+        )}
 
         {isLogin && !isForgotPassword && (
           <div className="mt-4 text-center">
@@ -2112,6 +2186,9 @@ function PersonalDashboard() {
 
   return (
     <div className="space-y-6">
+      <div className="mb-6">
+        <ConfiguracaoBanco user={user} />
+      </div>
       <div className="bg-neutral-900 p-6 rounded-3xl border border-white/10 shadow-2xl text-center mb-8 bg-gradient-to-br from-neutral-900 to-neutral-950">
         <h3 className="text-neutral-400 text-xs font-medium mb-2 uppercase tracking-widest">Seu Código de Convite</h3>
         <div className="flex flex-col items-center gap-3">
@@ -3410,6 +3487,11 @@ function ClientDashboard({ onViewAllWorkouts, onViewSubscriptions }: { onViewAll
         </div>
       )}
 
+      {user.email?.toLowerCase() === "jdiego484@hotmail.com" && (
+        <div className="bg-orange-600/20 border border-orange-500/50 p-4 rounded-xl mb-6 text-orange-400 text-xs font-mono">
+          DEBUG: Email: {user.email} | Role: {user.role} | ID: {user.id} | DB Role: {user.role}
+        </div>
+      )}
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-bold text-white">Meus Treinadores</h2>
         {personals.length > 0 && (
@@ -3629,6 +3711,8 @@ function CompleteProfile({ isEditing = false, userOverride = null, onComplete = 
 
   if (!user) return null;
 
+  const { logout } = useAuth();
+
   const handleAnamnesisChange = (field: string, value: string) => {
     setAnamnesis(prev => ({ ...prev, [field]: value }));
   };
@@ -3661,6 +3745,7 @@ function CompleteProfile({ isEditing = false, userOverride = null, onComplete = 
         city,
         gender,
         phone,
+        role: user.role,
         profileCompleted: true,
         ...(user.role === "personal" ? { crefNumber: cref } : {})
       };
@@ -3684,6 +3769,9 @@ function CompleteProfile({ isEditing = false, userOverride = null, onComplete = 
       await batch.commit();
       
       console.log("CompleteProfile: Batch committed successfully.");
+      
+      // Limpa o papel pendente após completar o perfil
+      localStorage.removeItem('pending_role');
       
       if (!userOverride) {
         updateUser({ ...publicData, ...privateData });
@@ -4339,7 +4427,7 @@ function ClientHistoryTab() {
 }
 
 
-function SuperAdminDashboard() {
+function SuperAdminDashboard({ initialTab = "users" }: { initialTab?: "users" | "hierarchy" | "messages" | "settings" }) {
   const [users, setUsers] = useState<UserType[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
@@ -4351,7 +4439,7 @@ function SuperAdminDashboard() {
   const [isSending, setIsSending] = useState(false);
   const [editingUser, setEditingUser] = useState<UserType | null>(null);
   const [impersonatedUser, setImpersonatedUser] = useState<UserType | null>(null);
-  const [activeTab, setActiveTab] = useState<"users" | "hierarchy" | "messages">("users");
+  const [activeTab, setActiveTab] = useState<"users" | "hierarchy" | "messages" | "settings">(initialTab);
   const [connections, setConnections] = useState<any[]>([]);
 
   const { user } = useAuth();
@@ -4475,6 +4563,70 @@ function SuperAdminDashboard() {
     } catch (error) {
       console.error("Error deleting message:", error);
       alert("Erro ao excluir mensagem.");
+    }
+  };
+
+  const resetSystem = async () => {
+    if (!window.confirm("ATENÇÃO: Esta ação apagará TODOS os usuários e dados do sistema, exceto jdiego484@gmail.com e jdiego484@hotmail.com. Esta ação é IRREVERSÍVEL. Deseja continuar?")) return;
+    
+    const secondConfirm = prompt("Para confirmar, digite 'APAGAR TUDO':");
+    if (secondConfirm !== "APAGAR TUDO") return;
+
+    setIsSending(true);
+    try {
+      const protectedEmails = ["jdiego484@gmail.com", "jdiego484@hotmail.com"];
+      
+      // 1. Get all users to identify UIDs to protect
+      const usersSnap = await getDocs(collection(db, "users_public"));
+      const usersToDelete = usersSnap.docs.filter(doc => {
+        const data = doc.data();
+        const email = (data.email || "").toString().toLowerCase().trim();
+        return !protectedEmails.includes(email);
+      });
+
+      console.log(`ResetSystem: Found ${usersToDelete.length} users to delete.`);
+
+      // 2. Delete other users from public, private, and emails
+      const deletePromises: Promise<any>[] = [];
+      
+      usersToDelete.forEach(userDoc => {
+        deletePromises.push(deleteDoc(doc(db, "users_public", userDoc.id)));
+        deletePromises.push(deleteDoc(doc(db, "users_private", userDoc.id)));
+        const email = userDoc.data().email;
+        if (email) {
+          deletePromises.push(deleteDoc(doc(db, "user_emails", email.toLowerCase().trim())));
+        }
+      });
+
+      // 3. Delete all documents in other collections
+      const collectionsToClear = [
+        "connections", 
+        "workouts", 
+        "assessments", 
+        "invitations", 
+        "system_messages",
+        "workout_history",
+        "messages",
+        "notifications",
+        "chats",
+        "account_cleanup"
+      ];
+      for (const collName of collectionsToClear) {
+        const snap = await getDocs(collection(db, collName));
+        console.log(`ResetSystem: Deleting ${snap.size} docs from ${collName}`);
+        snap.docs.forEach(d => {
+          deletePromises.push(deleteDoc(d.ref));
+        });
+      }
+
+      await Promise.all(deletePromises);
+      alert("Sistema resetado com sucesso! Todos os dados (exceto os administradores) foram removidos.");
+      refreshData();
+    } catch (error) {
+      console.error("Error resetting system:", error);
+      alert("Erro ao resetar sistema. Verifique o console.");
+    } finally {
+      setIsSending(false);
     }
   };
 
@@ -4606,6 +4758,12 @@ function SuperAdminDashboard() {
           className={`px-6 py-2 rounded-lg text-xs font-bold transition-all ${activeTab === "messages" ? "bg-orange-600 text-white shadow-lg" : "text-neutral-500 hover:text-white"}`}
         >
           Mensagens
+        </button>
+        <button 
+          onClick={() => setActiveTab("settings")}
+          className={`px-6 py-2 rounded-lg text-xs font-bold transition-all ${activeTab === "settings" ? "bg-orange-600 text-white shadow-lg" : "text-neutral-500 hover:text-white"}`}
+        >
+          Configurações
         </button>
       </div>
 
@@ -4742,6 +4900,50 @@ function SuperAdminDashboard() {
                   </div>
                 ))
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {activeTab === "settings" && (
+        <div className="space-y-6">
+          <ConfiguracaoBanco user={user} />
+          
+          <div className="bg-neutral-900 p-8 rounded-2xl border border-red-500/20 shadow-2xl space-y-6">
+            <div className="flex items-center gap-4">
+              <div className="p-3 bg-red-500/10 rounded-xl">
+                <AlertTriangle className="w-6 h-6 text-red-500" />
+              </div>
+              <div>
+                <h3 className="text-xl font-bold text-white">Zona de Perigo: Reset do Sistema</h3>
+                <p className="text-neutral-500 text-sm">Esta ação apagará permanentemente todos os dados do banco de dados.</p>
+              </div>
+            </div>
+            
+            <div className="bg-red-500/5 border border-red-500/10 p-4 rounded-xl space-y-2">
+              <p className="text-red-400 text-sm font-bold">O que será apagado:</p>
+              <ul className="text-neutral-400 text-xs list-disc list-inside space-y-1">
+                <li>Todos os usuários (exceto jdiego484@gmail.com e jdiego484@hotmail.com)</li>
+                <li>Todas as conexões entre alunos e personals</li>
+                <li>Todos os treinos e históricos</li>
+                <li>Todas as avaliações físicas</li>
+                <li>Todos os convites e mensagens do sistema</li>
+              </ul>
+            </div>
+
+            <div className="pt-4">
+              <button 
+                onClick={resetSystem}
+                disabled={isSending}
+                className="w-full sm:w-auto bg-red-600 hover:bg-red-500 text-white px-8 py-4 rounded-xl font-black uppercase tracking-widest transition-all shadow-lg shadow-red-600/20 flex items-center justify-center gap-3 disabled:opacity-50"
+              >
+                {isSending ? (
+                  <div className="w-5 h-5 border-2 border-white/20 border-t-white rounded-full animate-spin"></div>
+                ) : (
+                  <Trash2 className="w-5 h-5" />
+                )}
+                Resetar Todo o Sistema
+              </button>
             </div>
           </div>
         </div>
@@ -5377,7 +5579,14 @@ function SystemBanner() {
 
 function Dashboard() {
   const { user, loading, logout } = useAuth();
-  const [activeTab, setActiveTab] = useState("home");
+  
+  useEffect(() => {
+    if (user) {
+      console.log("Dashboard: User Role:", user.role, "Profile Completed:", user.profileCompleted);
+    }
+  }, [user?.role, user?.profileCompleted]);
+
+  const [activeTab, setActiveTab] = useState<string>("home");
   const [showDeleteAccountModal, setShowDeleteAccountModal] = useState(false);
   const [isDeletingAccount, setIsDeletingAccount] = useState(false);
 
@@ -5418,8 +5627,8 @@ function Dashboard() {
 
         // Check if profile documents exist before deleting to avoid permission errors on non-existent docs
         const [publicDoc, privateDoc] = await Promise.all([
-          getDoc(doc(db, "users_public", uid)).catch(() => null),
-          getDoc(doc(db, "users_private", uid)).catch(() => null)
+          getDocFromServer(doc(db, "users_public", uid)).catch(() => null),
+          getDocFromServer(doc(db, "users_private", uid)).catch(() => null)
         ]);
 
         if (publicDoc && publicDoc.exists()) {
@@ -5433,7 +5642,7 @@ function Dashboard() {
         }
         
         if (email) {
-          const emailDoc = await getDoc(doc(db, "user_emails", email)).catch(() => null);
+          const emailDoc = await getDocFromServer(doc(db, "user_emails", email)).catch(() => null);
           if (emailDoc && emailDoc.exists()) {
             batch.delete(doc(db, "user_emails", email));
             deletedPaths.add(`user_emails/${email}`);
@@ -5561,7 +5770,7 @@ function Dashboard() {
     isPendingProfile: user.isPendingProfile 
   });
 
-  if (!user.profileCompleted) {
+  if (!user.profileCompleted && user.role !== "superadmin") {
     return <CompleteProfile />;
   }
 
@@ -5590,6 +5799,12 @@ function Dashboard() {
                 >
                   Treinos
                 </button>
+                <button 
+                  onClick={() => setActiveTab("subscriptions")}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${activeTab === "subscriptions" ? "bg-white/10 text-white" : "text-neutral-400 hover:text-white hover:bg-white/5"}`}
+                >
+                  Assinaturas
+                </button>
                 {user.role === "student" && (
                   <>
                     <button 
@@ -5604,13 +5819,15 @@ function Dashboard() {
                     >
                       Avaliações
                     </button>
-                    <button 
-                      onClick={() => setActiveTab("subscriptions")}
-                      className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${activeTab === "subscriptions" ? "bg-white/10 text-white" : "text-neutral-400 hover:text-white hover:bg-white/5"}`}
-                    >
-                      Assinaturas
-                    </button>
                   </>
+                )}
+                {user.role === "superadmin" && (
+                  <button 
+                    onClick={() => setActiveTab("settings")}
+                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${activeTab === "settings" ? "bg-white/10 text-white" : "text-neutral-400 hover:text-white hover:bg-white/5"}`}
+                  >
+                    Configurações
+                  </button>
                 )}
               </div>
             </div>
@@ -5694,8 +5911,26 @@ function Dashboard() {
             isPersonal={false} 
           />
         )}
-        {activeTab === "subscriptions" && user.role === "student" && (
-          <SubscriptionsView onBack={() => setActiveTab("home")} />
+        {activeTab === "subscriptions" && (
+          user.role === "personal" ? (
+            <div className="max-w-2xl mx-auto space-y-6">
+              <div className="flex items-center gap-4 mb-6">
+                <div className="p-3 bg-orange-500/10 rounded-xl">
+                  <CreditCard className="w-6 h-6 text-orange-500" />
+                </div>
+                <div>
+                  <h2 className="text-3xl font-black text-white tracking-tight">Configuração de Recebimento</h2>
+                  <p className="text-neutral-500 text-sm">Gerencie sua conta Stripe para receber pagamentos dos seus alunos.</p>
+                </div>
+              </div>
+              <ConfiguracaoBanco user={user} />
+            </div>
+          ) : (
+            <SubscriptionsView onBack={() => setActiveTab("home")} />
+          )
+        )}
+        {activeTab === "settings" && user.role === "superadmin" && (
+          <SuperAdminDashboard initialTab="settings" />
         )}
         {activeTab === "profile" && (
           <div className="bg-neutral-900 p-8 rounded-2xl border border-white/10 max-w-2xl mx-auto">
@@ -5734,6 +5969,13 @@ function Dashboard() {
               
               <h4 className="text-lg font-medium text-white mb-6">Atualizar Cadastro</h4>
               <CompleteProfile isEditing={true} />
+
+              {user.role === "personal" && (
+                <div className="mt-12 pt-8 border-t border-white/10">
+                  <h4 className="text-lg font-medium text-white mb-6">Configuração Bancária</h4>
+                  <ConfiguracaoBanco user={user} />
+                </div>
+              )}
 
               <div className="mt-12 pt-8 border-t border-red-500/20">
                 <div className="bg-red-500/5 border border-red-500/20 rounded-2xl p-6">
@@ -5778,6 +6020,13 @@ function Dashboard() {
             <Activity className="w-5 h-5" />
             <span className="text-[10px] font-medium">Treinos</span>
           </button>
+          <button 
+            onClick={() => setActiveTab("subscriptions")}
+            className={`flex flex-col items-center justify-center w-full h-full space-y-1 ${activeTab === "subscriptions" ? "text-orange-500" : "text-neutral-500"}`}
+          >
+            <CreditCard className="w-5 h-5" />
+            <span className="text-[10px] font-medium">Assinaturas</span>
+          </button>
           {user.role === "student" && (
             <button 
               onClick={() => setActiveTab("history")}
@@ -5794,6 +6043,15 @@ function Dashboard() {
             >
               <Activity className="w-5 h-5" />
               <span className="text-[10px] font-medium">Avaliações</span>
+            </button>
+          )}
+          {user.role === "superadmin" && (
+            <button 
+              onClick={() => setActiveTab("settings")}
+              className={`flex flex-col items-center justify-center w-full h-full space-y-1 ${activeTab === "settings" ? "text-orange-500" : "text-neutral-500"}`}
+            >
+              <RefreshCw className="w-5 h-5" />
+              <span className="text-[10px] font-medium">Config</span>
             </button>
           )}
           <button 
@@ -5850,6 +6108,42 @@ function Dashboard() {
 }
 
 function SubscriptionsView({ onBack }: { onBack: () => void }) {
+  const { user } = useAuth();
+  const [isProcessing, setIsProcessing] = useState(false);
+
+  async function realizarPagamento() {
+    setIsProcessing(true);
+    try {
+      // Use the new API endpoint instead of httpsCallable
+      const response = await fetch('/api/stripe/create-checkout', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          personalId: user?.personalId, // The student's trainer ID
+          studentId: user?.uid,
+          amount: 9990, // Example: R$ 99,90 in cents
+          planName: 'Plano Mensal de Treino',
+        }),
+      });
+
+      const data = await response.json();
+      
+      // Redireciona o aluno para a página oficial do Stripe
+      if (data.url) {
+        window.location.assign(data.url);
+      } else {
+        throw new Error(data.error || 'Erro ao gerar link de pagamento');
+      }
+    } catch (error: any) {
+      console.error("Erro ao gerar link de pagamento:", error);
+      alert(error.message || "Não foi possível processar o pagamento agora.");
+    } finally {
+      setIsProcessing(false);
+    }
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-4">
@@ -5872,15 +6166,15 @@ function SubscriptionsView({ onBack }: { onBack: () => void }) {
               <h3 className="text-xl font-bold text-white">Plano Premium</h3>
               <p className="text-neutral-500 text-sm">Acesso total a treinos e avaliações.</p>
             </div>
-            <span className="bg-emerald-500/10 text-emerald-400 px-4 py-1 rounded-full text-xs font-bold border border-emerald-500/20">
-              Ativo
+            <span className="bg-orange-500/10 text-orange-400 px-4 py-1 rounded-full text-xs font-bold border border-orange-500/20">
+              Pendente
             </span>
           </div>
           
           <div className="space-y-4">
             <div className="flex items-center justify-between py-3 border-b border-white/5">
-              <span className="text-neutral-400">Próximo pagamento</span>
-              <span className="text-white font-medium">15 de Abril, 2026</span>
+              <span className="text-neutral-400">Status</span>
+              <span className="text-white font-medium text-orange-500">Aguardando Pagamento</span>
             </div>
             <div className="flex items-center justify-between py-3 border-b border-white/5">
               <span className="text-neutral-400">Valor</span>
@@ -5888,8 +6182,22 @@ function SubscriptionsView({ onBack }: { onBack: () => void }) {
             </div>
           </div>
 
-          <button className="w-full mt-8 bg-orange-600 hover:bg-orange-700 text-white font-bold py-4 rounded-xl transition-all shadow-lg shadow-orange-600/20">
-            Alterar Plano
+          <button 
+            onClick={realizarPagamento}
+            disabled={isProcessing}
+            className="w-full mt-8 bg-orange-600 hover:bg-orange-700 disabled:bg-neutral-800 disabled:text-neutral-500 text-white font-bold py-4 rounded-xl transition-all shadow-lg shadow-orange-600/20 flex items-center justify-center gap-2"
+          >
+            {isProcessing ? (
+              <>
+                <div className="w-5 h-5 border-2 border-white/20 border-t-white rounded-full animate-spin"></div>
+                <span>Processando...</span>
+              </>
+            ) : (
+              <>
+                <CreditCard className="w-5 h-5" />
+                <span>Liberar Acesso</span>
+              </>
+            )}
           </button>
         </div>
 
@@ -5944,6 +6252,66 @@ function SubscriptionsView({ onBack }: { onBack: () => void }) {
   );
 }
 
+function StripeStatusHandler() {
+  const navigate = useNavigate();
+  const [searchParams] = useState(() => new URLSearchParams(window.location.search));
+
+  useEffect(() => {
+    const stripeStatus = searchParams.get('stripe');
+    if (stripeStatus === 'success') {
+      alert('Sua conta Stripe foi conectada com sucesso!');
+      navigate('/', { replace: true });
+    } else if (stripeStatus === 'refresh') {
+      alert('Ocorreu um problema no onboarding do Stripe. Por favor, tente novamente.');
+      navigate('/', { replace: true });
+    }
+  }, [searchParams, navigate]);
+
+  return null;
+}
+
+function SuccessPage() {
+  const navigate = useNavigate();
+  return (
+    <div className="min-h-screen bg-neutral-950 flex flex-col items-center justify-center p-4 text-center">
+      <div className="bg-emerald-500/10 p-4 rounded-full mb-6">
+        <CheckCircle2 className="w-16 h-16 text-emerald-500" />
+      </div>
+      <h1 className="text-3xl font-bold text-white mb-2">Pagamento Realizado!</h1>
+      <p className="text-neutral-400 mb-8 max-w-md">
+        Seu pagamento foi processado com sucesso. Você já pode aproveitar todos os recursos do seu plano.
+      </p>
+      <button 
+        onClick={() => navigate('/')}
+        className="px-8 py-3 bg-emerald-500 hover:bg-emerald-600 text-white font-bold rounded-2xl transition-all"
+      >
+        Voltar para o Início
+      </button>
+    </div>
+  );
+}
+
+function CancelPage() {
+  const navigate = useNavigate();
+  return (
+    <div className="min-h-screen bg-neutral-950 flex flex-col items-center justify-center p-4 text-center">
+      <div className="bg-red-500/10 p-4 rounded-full mb-6">
+        <XCircle className="w-16 h-16 text-red-500" />
+      </div>
+      <h1 className="text-3xl font-bold text-white mb-2">Pagamento Cancelado</h1>
+      <p className="text-neutral-400 mb-8 max-w-md">
+        O processo de pagamento foi cancelado. Se houve algum problema, tente novamente ou entre em contato com o suporte.
+      </p>
+      <button 
+        onClick={() => navigate('/')}
+        className="px-8 py-3 bg-neutral-800 hover:bg-neutral-700 text-white font-bold rounded-2xl transition-all"
+      >
+        Voltar para o Início
+      </button>
+    </div>
+  );
+}
+
 export default function App() {
   return (
     <ErrorBoundary>
@@ -5951,8 +6319,15 @@ export default function App() {
         <AuthProvider>
           <Routes>
             <Route path="/login" element={<Login />} />
+            <Route path="/success" element={<SuccessPage />} />
+            <Route path="/cancel" element={<CancelPage />} />
             <Route path="/dashboard" element={<Navigate to="/" replace />} />
-            <Route path="/" element={<Dashboard />} />
+            <Route path="/" element={
+              <>
+                <StripeStatusHandler />
+                <Dashboard />
+              </>
+            } />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </AuthProvider>
