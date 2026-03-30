@@ -32,6 +32,17 @@ const ConfiguracaoBanco: React.FC<ConfiguracaoBancoProps> = ({ user }) => {
         body: JSON.stringify(body),
       });
 
+      if (!response.ok) {
+        const text = await response.text();
+        console.error('Erro na resposta do servidor:', text);
+        try {
+          const errorData = JSON.parse(text);
+          throw new Error(errorData.error || `Erro no servidor (${response.status})`);
+        } catch (e) {
+          throw new Error(`Erro no servidor (${response.status}). Verifique se o backend está rodando.`);
+        }
+      }
+
       const data = await response.json();
       if (data.url) {
         window.location.assign(data.url);

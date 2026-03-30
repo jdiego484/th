@@ -25,17 +25,28 @@ console.log("Firebase config loaded for project:", firebaseConfig.projectId);
 // Initialize Firebase Admin
 if (!admin.apps.length) {
   console.log("Initializing Firebase Admin...");
-  admin.initializeApp({
-    projectId: firebaseConfig.projectId,
-  });
+  try {
+    // In AI Studio/Cloud Run, initializeApp() with no arguments 
+    // is often more reliable as it picks up ambient credentials.
+    // We fall back to the config if needed.
+    admin.initializeApp({
+      projectId: process.env.GOOGLE_CLOUD_PROJECT || firebaseConfig.projectId,
+    });
+    console.log("Firebase Admin initialized successfully.");
+  } catch (initError) {
+    console.error("Error initializing Firebase Admin with default credentials, trying with config:", initError);
+    admin.initializeApp({
+      projectId: firebaseConfig.projectId,
+    });
+  }
 }
-const db = getFirestore(admin.app(), firebaseConfig.firestoreDatabaseId);
-console.log("Firestore initialized with database:", firebaseConfig.firestoreDatabaseId);
+const db = getFirestore(admin.app(), firebaseConfig.firestoreDatabaseId || undefined);
+console.log("Firestore initialized with database:", firebaseConfig.firestoreDatabaseId || "(default)");
 
 // Initialize Stripe
 console.log("Initializing Stripe...");
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || "", {
-  apiVersion: "2025-02-24-preview" as any,
+  apiVersion: "2024-06-20",
 });
 console.log("Stripe initialized.");
 
@@ -63,7 +74,15 @@ async function startServer() {
       }
 
       // 1. Check if user already has a Stripe account
-      const privateDoc = await db.collection("users_private").doc(uid).get();
+      console.log(`Checking Firestore for user ${uid} in database ${firebaseConfig.firestoreDatabaseId || '(default)'}`);
+      let privateDoc;
+      try {
+        privateDoc = await db.collection("users_private").doc(uid).get();
+      } catch (fsError: any) {
+        console.error("Firestore Read Error (users_private):", fsError);
+        throw new Error(`Erro ao acessar o banco de dados: ${fsError.message}`);
+      }
+      
       let stripeAccountId = privateDoc.data()?.stripeAccountId;
 
       if (!stripeAccountId) {
@@ -86,9 +105,15 @@ async function startServer() {
         stripeAccountId = account.id;
 
         // 3. Save to Firestore
-        await db.collection("users_private").doc(uid).set({
-          stripeAccountId: stripeAccountId
-        }, { merge: true });
+        console.log(`Saving Stripe Account ID ${stripeAccountId} for user ${uid}`);
+        try {
+          await db.collection("users_private").doc(uid).set({
+            stripeAccountId: stripeAccountId
+          }, { merge: true });
+        } catch (fsWriteError: any) {
+          console.error("Firestore Write Error (users_private):", fsWriteError);
+          throw new Error(`Erro ao salvar dados no banco: ${fsWriteError.message}`);
+        }
       }
 
       // 4. Generate Onboarding Link
@@ -112,7 +137,15 @@ async function startServer() {
       const { personalId, studentId, amount, planName } = req.body;
 
       // 1. Get Personal's Stripe Account ID
-      const personalPrivateDoc = await db.collection("users_private").doc(personalId).get();
+      console.log(`Checking Firestore for personal ${personalId} in database ${firebaseConfig.firestoreDatabaseId || '(default)'}`);
+      let personalPrivateDoc;
+      try {
+        personalPrivateDoc = await db.collection("users_private").doc(personalId).get();
+      } catch (fsError: any) {
+        console.error("Firestore Read Error (checkout - users_private):", fsError);
+        throw new Error(`Erro ao acessar o banco de dados: ${fsError.message}`);
+      }
+      
       const stripeAccountId = personalPrivateDoc.data()?.stripeAccountId;
 
       if (!stripeAccountId) {
@@ -231,6 +264,12 @@ async function startServer() {
       res.sendFile(path.join(distPath, "index.html"));
     });
   }
+
+  // Global error handler
+  app.use((err: any, req: any, res: any, next: any) => {
+    console.error("Global Error Handler:", err);
+    res.status(500).json({ error: err.message || "Internal Server Error" });
+  });
 
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`>>> SERVER IS LISTENING ON PORT ${PORT} <<<`);
