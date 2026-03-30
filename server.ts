@@ -13,23 +13,31 @@ dotenv.config();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Load Firebase config
-const firebaseConfigPath = path.join(__dirname, "firebase-applet-config.json");
-const firebaseConfig = JSON.parse(fs.readFileSync(firebaseConfigPath, "utf8"));
+// Load Firebase config with fallback to env vars
+let firebaseConfig: any = {};
+try {
+  const configPath = path.join(process.cwd(), "firebase-applet-config.json");
+  if (fs.existsSync(configPath)) {
+    firebaseConfig = JSON.parse(fs.readFileSync(configPath, "utf8"));
+  }
+} catch (e) {
+  console.warn("Could not load firebase-applet-config.json, using environment variables.");
+}
+
+const projectId = process.env.VITE_FIREBASE_PROJECT_ID || firebaseConfig.projectId;
+const databaseId = process.env.VITE_FIREBASE_DATABASE_ID || firebaseConfig.firestoreDatabaseId;
 
 // Initialize Firebase Admin
-if (!admin.apps.length) {
+if (!admin.apps.length && projectId) {
   try {
     admin.initializeApp({
-      projectId: process.env.GOOGLE_CLOUD_PROJECT || firebaseConfig.projectId,
+      projectId: projectId,
     });
   } catch (initError) {
-    admin.initializeApp({
-      projectId: firebaseConfig.projectId,
-    });
+    console.error("Firebase Admin Init Error:", initError);
   }
 }
-const db = getFirestore(admin.app(), firebaseConfig.firestoreDatabaseId || undefined);
+const db = projectId ? getFirestore(admin.app(), databaseId || undefined) : null;
 
 // Initialize Stripe
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || "", {
@@ -43,15 +51,15 @@ app.use(express.json());
 
 // API Routes
 app.get("/api/health", (req, res) => {
-  res.json({ status: "ok" });
+  res.json({ status: "ok", environment: process.env.VERCEL ? 'vercel' : 'local' });
 });
 
 // Stripe Connect: Create Express Account & Onboarding Link
 app.post("/api/stripe/onboarding", async (req, res) => {
   try {
     const { uid, email } = req.body;
-    if (!uid || !email) {
-      return res.status(400).json({ error: "UID and Email are required" });
+    if (!uid || !email || !db) {
+      return res.status(400).json({ error: "Missing required data or database connection" });
     }
 
     let privateDoc = await db.collection("users_private").doc(uid).get();
@@ -88,6 +96,8 @@ app.post("/api/stripe/onboarding", async (req, res) => {
 app.post("/api/stripe/create-checkout", async (req, res) => {
   try {
     const { personalId, studentId, amount, planName } = req.body;
+    if (!db) return res.status(500).json({ error: "Database not initialized" });
+
     const personalPrivateDoc = await db.collection("users_private").doc(personalId).get();
     const stripeAccountId = personalPrivateDoc.data()?.stripeAccountId;
 
@@ -131,7 +141,7 @@ app.post("/api/stripe/webhook", express.raw({ type: "application/json" }), async
     return res.status(400).send(`Webhook Error: ${err.message}`);
   }
 
-  if (event.type === "account.updated") {
+  if (event.type === "account.updated" && db) {
     const account = event.data.object as Stripe.Account;
     if (account.details_submitted && account.charges_enabled) {
       const privateDocs = await db.collection("users_private").where("stripeAccountId", "==", account.id).limit(1).get();
@@ -143,26 +153,27 @@ app.post("/api/stripe/webhook", express.raw({ type: "application/json" }), async
   res.json({ received: true });
 });
 
-// Vite / Static Files
-async function setupVite() {
-  const distPath = path.join(process.cwd(), 'dist');
-  const isProduction = process.env.NODE_ENV === "production" || process.env.VERCEL === '1';
+// Vite / Static Files (Only for local development)
+if (!process.env.VERCEL) {
+  async function setupVite() {
+    const distPath = path.join(process.cwd(), 'dist');
+    const isProduction = process.env.NODE_ENV === "production";
 
-  if (!isProduction) {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
-    });
-    app.use(vite.middlewares);
-  } else {
-    app.use(express.static(distPath));
-    app.get("*", (req, res) => {
-      res.sendFile(path.join(distPath, "index.html"));
-    });
+    if (!isProduction) {
+      const vite = await createViteServer({
+        server: { middlewareMode: true },
+        appType: "spa",
+      });
+      app.use(vite.middlewares);
+    } else {
+      app.use(express.static(distPath));
+      app.get("*", (req, res) => {
+        res.sendFile(path.join(distPath, "index.html"));
+      });
+    }
   }
+  setupVite();
 }
-
-setupVite();
 
 // Global Error Handler
 app.use((err: any, req: any, res: any, next: any) => {
@@ -170,7 +181,7 @@ app.use((err: any, req: any, res: any, next: any) => {
   res.status(500).json({ error: err.message || "Internal Server Error" });
 });
 
-if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
+if (!process.env.VERCEL) {
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
   });
