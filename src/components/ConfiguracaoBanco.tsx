@@ -35,12 +35,19 @@ const ConfiguracaoBanco: React.FC<ConfiguracaoBancoProps> = ({ user }) => {
       if (!response.ok) {
         const text = await response.text();
         console.error('Erro na resposta do servidor:', text);
+        let errorMessage = `Erro no servidor (${response.status}).`;
         try {
           const errorData = JSON.parse(text);
-          throw new Error(errorData.error || `Erro no servidor (${response.status})`);
+          errorMessage = errorData.error || errorMessage;
         } catch (e) {
-          throw new Error(`Erro no servidor (${response.status}). Verifique se o backend está rodando.`);
+          // If not JSON, use the raw text if it's short, otherwise generic
+          if (text && text.length < 200) {
+            errorMessage += ` Detalhes: ${text}`;
+          } else {
+            errorMessage += ' Verifique se o backend está rodando e configurado corretamente.';
+          }
         }
+        throw new Error(errorMessage);
       }
 
       const data = await response.json();
