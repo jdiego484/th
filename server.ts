@@ -77,12 +77,19 @@ console.log("FIREBASE_DATABASE_ID:", databaseId || "DEFAULT");
 console.log("NODE_ENV:", process.env.NODE_ENV || "not set");
 console.log("-----------------------------");
 
-if (!stripeSecretKey) {
-  console.warn("⚠️ STRIPE_SECRET_KEY is not set in environment variables.");
+// Initialize Stripe with the secret key from environment variables
+let stripe: Stripe;
+try {
+  const secretKey = process.env.STRIPE_SECRET_KEY;
+  if (!secretKey) {
+    console.warn("⚠️ STRIPE_SECRET_KEY is not set. Stripe functionality will be limited.");
+  }
+  stripe = new Stripe(secretKey || "");
+  console.log("✅ Stripe initialized successfully.");
+} catch (stripeInitError) {
+  console.error("❌ Stripe Initialization Error:", stripeInitError);
+  stripe = new Stripe("dummy_key");
 }
-const stripe = new Stripe(stripeSecretKey || "", {
-  apiVersion: "2026-03-25.dahlia" as any,
-});
 
 export const app = express();
 const PORT = 3000;
@@ -128,39 +135,44 @@ app.get("/api/health", async (req, res) => {
 
 // Stripe Connect: Create Express Account & Onboarding Link
 app.post("/api/stripe/onboarding", async (req, res) => {
-  const { uid, email } = req.body;
-  console.log(`[Stripe Onboarding] Request started - UID: ${uid}, Email: ${email}`);
-
   try {
+    const { uid, email } = req.body;
+    console.log(`[Stripe Onboarding] Request received - UID: ${uid}, Email: ${email}`);
+
     if (!stripeSecretKey) {
-      throw new Error("Configuração do Stripe incompleta (STRIPE_SECRET_KEY ausente).");
+      console.error("[Stripe Onboarding] Error: STRIPE_SECRET_KEY is missing");
+      return res.status(500).json({ error: "Configuração do Stripe incompleta (STRIPE_SECRET_KEY ausente)." });
     }
 
     if (!appUrl) {
-      throw new Error("Configuração do servidor incompleta (APP_URL ausente).");
+      console.error("[Stripe Onboarding] Error: APP_URL is missing");
+      return res.status(500).json({ error: "Configuração do servidor incompleta (APP_URL ausente)." });
     }
 
     if (!uid || !email) {
+      console.error("[Stripe Onboarding] Error: Missing uid or email", { uid, email });
       return res.status(400).json({ error: "UID e Email são obrigatórios." });
     }
 
     if (!db) {
-      throw new Error("Conexão com o banco de dados (Firestore) não inicializada.");
+      console.error("[Stripe Onboarding] Error: Firestore not initialized");
+      return res.status(500).json({ error: "Conexão com o banco de dados (Firestore) não inicializada." });
     }
 
     let stripeAccountId: string | undefined;
 
     try {
-      console.log(`[Stripe Onboarding] Fetching private doc for UID: ${uid}`);
+      console.log(`[Stripe Onboarding] Step 1: Fetching private doc for UID: ${uid}`);
       const privateDoc = await db.collection("users_private").doc(uid).get();
+      console.log(`[Stripe Onboarding] Step 1 Success: Doc exists? ${privateDoc.exists}`);
       stripeAccountId = privateDoc.data()?.stripeAccountId;
     } catch (dbError: any) {
-      console.error("[Stripe Onboarding] Firestore Error:", dbError);
-      throw new Error(`Erro ao acessar o banco de dados: ${dbError.message}`);
+      console.error("[Stripe Onboarding] Step 1 Failure (Firestore Fetch):", dbError);
+      return res.status(500).json({ error: `Erro ao acessar o banco de dados: ${dbError.message}` });
     }
 
     if (!stripeAccountId) {
-      console.log(`[Stripe Onboarding] Creating new Stripe Express account for ${email}`);
+      console.log(`[Stripe Onboarding] Step 2: Creating new Stripe Express account for ${email}`);
       try {
         const account = await stripe.accounts.create({
           type: "express",
@@ -169,24 +181,22 @@ app.post("/api/stripe/onboarding", async (req, res) => {
             card_payments: { requested: true },
             transfers: { requested: true },
           },
-          settings: {
-            payouts: {
-              schedule: { interval: "manual" }
-            }
-          }
         });
         stripeAccountId = account.id;
+        console.log(`[Stripe Onboarding] Step 2 Success: New account created: ${stripeAccountId}`);
+        
+        console.log(`[Stripe Onboarding] Step 3: Saving account ID to Firestore for UID: ${uid}`);
         await db.collection("users_private").doc(uid).set({ stripeAccountId }, { merge: true });
-        console.log(`[Stripe Onboarding] New account created: ${stripeAccountId}`);
+        console.log(`[Stripe Onboarding] Step 3 Success: Account ID saved.`);
       } catch (stripeError: any) {
-        console.error("[Stripe Onboarding] Stripe Account Creation Error:", stripeError);
-        throw new Error(`Erro ao criar conta no Stripe: ${stripeError.message}`);
+        console.error("[Stripe Onboarding] Step 2/3 Failure (Stripe Account Creation/Saving):", stripeError);
+        return res.status(500).json({ error: `Erro ao criar conta no Stripe: ${stripeError.message}` });
       }
     } else {
-      console.log(`[Stripe Onboarding] Using existing account: ${stripeAccountId}`);
+      console.log(`[Stripe Onboarding] Step 2 Skip: Using existing account: ${stripeAccountId}`);
     }
 
-    console.log(`[Stripe Onboarding] Generating account link for ${stripeAccountId}`);
+    console.log(`[Stripe Onboarding] Step 4: Generating account link for ${stripeAccountId}`);
     try {
       const accountLink = await stripe.accountLinks.create({
         account: stripeAccountId,
@@ -195,18 +205,17 @@ app.post("/api/stripe/onboarding", async (req, res) => {
         type: "account_onboarding",
       });
 
-      console.log(`[Stripe Onboarding] Link generated successfully`);
+      console.log(`[Stripe Onboarding] Step 4 Success: Link generated`);
       return res.json({ url: accountLink.url });
     } catch (linkError: any) {
-      console.error("[Stripe Onboarding] Stripe Link Creation Error:", linkError);
-      throw new Error(`Erro ao gerar link do Stripe: ${linkError.message}`);
+      console.error("[Stripe Onboarding] Step 4 Failure (Stripe Link Creation):", linkError);
+      return res.status(500).json({ error: `Erro ao gerar link do Stripe: ${linkError.message}` });
     }
-  } catch (error: any) {
-    console.error("[Stripe Onboarding] Final Catch Error:", error);
-    // Ensure we ALWAYS return JSON
+  } catch (globalError: any) {
+    console.error("[Stripe Onboarding] CRITICAL UNHANDLED ERROR:", globalError);
     return res.status(500).json({ 
-      error: error.message || "Erro interno no servidor ao processar onboarding.",
-      details: error.stack && process.env.NODE_ENV !== 'production' ? error.stack : undefined
+      error: "Erro interno crítico no servidor.",
+      details: globalError.message
     });
   }
 });
