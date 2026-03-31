@@ -2,8 +2,11 @@ import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
 import { fileURLToPath } from "url";
-import Stripe from "stripe";
-import admin from "firebase-admin";
+import StripePkg from "stripe";
+import type { Stripe as StripeType } from "stripe";
+const Stripe = (StripePkg as any).default || StripePkg;
+import adminPkg from "firebase-admin";
+const admin = (adminPkg as any).default || adminPkg;
 import dotenv from "dotenv";
 import * as fs from "fs";
 import { getFirestore } from "firebase-admin/firestore";
@@ -33,15 +36,23 @@ let finalProjectId = projectId;
 if (!admin.apps.length) {
   try {
     const serviceAccountVar = process.env.FIREBASE_SERVICE_ACCOUNT;
-    if (serviceAccountVar) {
-      const serviceAccount = JSON.parse(serviceAccountVar);
-      admin.initializeApp({
-        credential: admin.credential.cert(serviceAccount),
-        projectId: serviceAccount.project_id,
-        databaseURL: `https://${serviceAccount.project_id}.firebaseio.com`
-      });
-      finalProjectId = serviceAccount.project_id;
-      console.log("✅ Using Service Account from environment variable. Project ID:", finalProjectId);
+    if (serviceAccountVar && serviceAccountVar.trim() && serviceAccountVar !== "undefined" && serviceAccountVar !== "null") {
+      try {
+        const serviceAccount = JSON.parse(serviceAccountVar);
+        if (serviceAccount && typeof serviceAccount === 'object') {
+          admin.initializeApp({
+            credential: admin.credential.cert(serviceAccount),
+            projectId: serviceAccount.project_id,
+            databaseURL: `https://${serviceAccount.project_id}.firebaseio.com`
+          });
+          finalProjectId = serviceAccount.project_id;
+          console.log("✅ Using Service Account from environment variable. Project ID:", finalProjectId);
+        } else {
+          console.warn("⚠️ FIREBASE_SERVICE_ACCOUNT is not a valid JSON object.");
+        }
+      } catch (parseError) {
+        console.error("❌ Error parsing FIREBASE_SERVICE_ACCOUNT:", parseError);
+      }
     } else if (finalProjectId) {
       admin.initializeApp({
         credential: admin.credential.applicationDefault(),
@@ -78,7 +89,7 @@ console.log("NODE_ENV:", process.env.NODE_ENV || "not set");
 console.log("-----------------------------");
 
 // Initialize Stripe with the secret key from environment variables
-let stripe: Stripe;
+let stripe: StripeType;
 try {
   const secretKey = process.env.STRIPE_SECRET_KEY;
   if (!secretKey) {
@@ -221,7 +232,7 @@ app.post("/api/stripe/onboarding", async (req, res) => {
 });
 
 // Stripe: Create Checkout Session
-app.post("/api/stripe/create-checkout", async (req, res) => {
+app.post("/api/stripe/create-checkout", async (req: any, res: any) => {
   try {
     const { personalId, studentId, amount, planName } = req.body;
     if (!db) return res.status(500).json({ error: "Database not initialized" });
@@ -270,7 +281,7 @@ app.post("/api/stripe/webhook", express.raw({ type: "application/json" }), async
   }
 
   if (event.type === "account.updated" && db) {
-    const account = event.data.object as Stripe.Account;
+    const account = event.data.object as StripeType.Account;
     if (account.details_submitted && account.charges_enabled) {
       const privateDocs = await db.collection("users_private").where("stripeAccountId", "==", account.id).limit(1).get();
       if (!privateDocs.empty) {
